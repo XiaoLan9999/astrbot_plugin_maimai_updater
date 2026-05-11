@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import time
-from dataclasses import dataclass
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import register
@@ -24,26 +22,11 @@ from .utils import (
 )
 
 
-class PendingBindReplaced(RuntimeError):
-    pass
-
-
-@dataclass(slots=True)
-class PendingBind:
-    future: asyncio.Future
-
-
-@dataclass(slots=True)
-class SensitiveInput:
-    value: str
-    recall: RecallResult
-
-
 @register(
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把机台成绩同步到水鱼。",
-    "0.2.0",
+    "0.3.0",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -55,7 +38,8 @@ class MaimaiUpdaterPlugin(Star):
         data_dir = StarTools.get_data_dir(plugin_name="astrbot_plugin_maimai_updater")
         self.store = UserStore(data_dir)
 
-        self.bind_timeout = self._int_config("bind_timeout_seconds", 180)
+        self.sgid_update_prefix = str(self.config.get("sgid_update_prefix", "") or "").strip()
+        self.enable_clear_command = bool(self.config.get("enable_clear_command", True))
         self.warn_unsupported_recall = bool(self.config.get("warn_unsupported_recall", True))
         self.service = MaimaiService(
             timeout=self._int_config("request_timeout_seconds", 30),
@@ -65,7 +49,6 @@ class MaimaiUpdaterPlugin(Star):
             context,
             kook_token=str(self.config.get("kook_token", "") or ""),
         )
-        self._pending_binds: dict[str, PendingBind] = {}
         self.sgid_max_age_seconds = self._int_config("sgid_max_age_seconds", 180)
         self._used_sgid_hashes: dict[str, float] = {}
 
@@ -95,10 +78,17 @@ class MaimaiUpdaterPlugin(Star):
             return
         await self._send_text(event, "🔒 已尝试撤回消息，如果没撤回请手动撤回。")
 
-    def _cancel_old_pending(self, user_key: str) -> None:
-        old = self._pending_binds.pop(user_key, None)
-        if old and not old.future.done():
-            old.future.set_exception(PendingBindReplaced())
+    def _extract_direct_update_sgid(self, text: str) -> str | None:
+        content = (text or "").strip()
+        if not content:
+            return None
+        if self.sgid_update_prefix:
+            if not content.startswith(self.sgid_update_prefix):
+                return None
+            content = content[len(self.sgid_update_prefix):].strip()
+        if not content.upper().startswith("SGWCMAID"):
+            return None
+        return extract_sgid(content)
 
     def _validate_sgid_for_one_time_use(self, sgid: str) -> str:
         freshness = validate_sgid_freshness(
@@ -120,143 +110,33 @@ class MaimaiUpdaterPlugin(Star):
         self._used_sgid_hashes[digest] = now + max(self.sgid_max_age_seconds + 60, 300)
         return ""
 
-    async def _request_sgid(
-        self,
-        event: AstrMessageEvent,
-        user_key: str,
-        *,
-        prompt: str,
-        timeout_message: str,
-    ) -> SensitiveInput | MessageEventResult:
-        self._cancel_old_pending(user_key)
-
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-        self._pending_binds[user_key] = PendingBind(future=future)
-        await self._send_text(event, prompt)
-
-        try:
-            sensitive: SensitiveInput = await asyncio.wait_for(
-                future,
-                timeout=max(self.bind_timeout, 1),
-            )
-            return sensitive
-        except asyncio.TimeoutError:
-            self._pending_binds.pop(user_key, None)
-            return self._message(timeout_message)
-        except PendingBindReplaced:
-            return self._message("已开始新的 SGID 流程，旧流程已取消。")
-        finally:
-            current = self._pending_binds.get(user_key)
-            if current and current.future is future and future.done():
-                self._pending_binds.pop(user_key, None)
-
-    @command("maimai_bind", alias={"舞萌绑定", "水鱼绑定"})
-    async def bind_arcade(self, event: AstrMessageEvent):
-        user_key = self._user_key(event)
-        sensitive = await self._request_sgid(
-            event,
-            user_key,
-            prompt=(
-                f"请在 {self.bind_timeout} 秒内发送官方二维码识别出的 SGWCMAID/SGID 文本。\n"
-                "这条 SGID 只用于本次账号验证，不会保存；群聊中我会尝试自动撤回。"
-            ),
-            timeout_message="⏰ 绑定超时，请重新执行 /maimai_bind。",
-        )
-        if not isinstance(sensitive, SensitiveInput):
-            return sensitive
-
-        if not is_probable_sgid(sensitive.value):
-            return self._message(
-                "❌ SGID 格式不正确，请重新执行 /maimai_bind 后发送以 SGWCMAID 开头的文本。"
-            )
-        if validation_error := self._validate_sgid_for_one_time_use(sensitive.value):
-            return self._message(f"❌ {validation_error}")
-
-        await self._send_text(event, "⏳ 正在解析本次二维码，请稍候...")
-        try:
-            result = await self.service.bind_from_sgid(sensitive.value)
-        except Exception as exc:
-            logger.exception("[MaimaiUpdater] bind failed")
-            return self._message(
-                f"❌ 绑定失败：{self.service.describe_error(exc)}"
-            )
-
-        await self.store.set_player_profile(
-            user_key,
-            player_name="",
-            rating=0,
-        )
-        lines = [
-            "✅ 官方二维码验证成功！\n"
-            "我不会保存本次 SGID 或官方临时凭据。之后更新水鱼仍需重新提供一次 SGID。\n"
-            "接下来可发送 /maimai_token <水鱼 Import-Token>，再用 /maimai_update 更新水鱼。\n"
-            "玩家名/Rating 会在更新时尽量从官方成绩链路获取。"
-        ]
-        if result.player_warning:
-            lines.append(f"⚠️ {result.player_warning}")
-        return self._message("\n".join(lines))
-
-    @command("maimai_token", alias={"水鱼token"})
-    async def bind_token(self, event: AstrMessageEvent, token: str = ""):
-        token = (token or "").strip()
-        if not token:
-            return self._message(
-                "用法：/maimai_token <水鱼 Import-Token>\n"
-                "群聊中我会尝试撤回包含 Token 的消息。"
-            )
-
+    async def _recall_current_message(self, event: AstrMessageEvent) -> None:
         recall = await self.recaller.recall_sensitive(event)
-        if recall.attempted:
-            event.stop_event()
-            await self._send_recall_notice(event, recall)
+        await self._send_recall_notice(event, recall)
 
-        if not is_probable_import_token(token):
-            await self._send_text(
-                event,
-                "❌ 水鱼 Import-Token 格式看起来不正确，请确认长度约 127-132 字符且只包含字母、数字、_、-。",
-            )
-            return
-
-        await self.store.set_import_token(self._user_key(event), token)
-        await self._send_text(
-            event,
-            f"✅ 水鱼 Token 绑定成功：{mask_secret(token)}"
-        )
-
-    @command("maimai_update", alias={"更新水鱼", "更新b50"})
-    async def update_scores(self, event: AstrMessageEvent):
+    async def _update_from_sgid(self, event: AstrMessageEvent, sgid: str) -> None:
         user_key = self._user_key(event)
         record = self.store.get(user_key)
         if not record.divingfish_import_token:
-            return self._message(
+            await self._send_text(
+                event,
                 "❌ 尚未绑定水鱼 Import-Token。\n"
-                "请先执行 /maimai_token <水鱼 Import-Token>。"
+                "请先执行 maimaitoken <水鱼 Import-Token> 或 水鱼token <水鱼 Import-Token>。",
             )
+            return
 
-        sensitive = await self._request_sgid(
-            event,
-            user_key,
-            prompt=(
-                f"请在 {self.bind_timeout} 秒内发送本次更新用的 SGWCMAID/SGID 文本。\n"
-                "这条 SGID 只用于本次更新，使用后不会保存；群聊中我会尝试自动撤回。"
-            ),
-            timeout_message="⏰ 更新超时，请重新执行 /maimai_update。",
-        )
-        if not isinstance(sensitive, SensitiveInput):
-            return sensitive
+        if not is_probable_sgid(sgid):
+            await self._send_text(event, "❌ SGID 格式不正确，请发送以 SGWCMAID 开头的完整文本。")
+            return
 
-        if not is_probable_sgid(sensitive.value):
-            return self._message(
-                "❌ SGID 格式不正确，请重新执行 /maimai_update 后发送以 SGWCMAID 开头的文本。"
-            )
-        if validation_error := self._validate_sgid_for_one_time_use(sensitive.value):
-            return self._message(f"❌ {validation_error}")
+        if validation_error := self._validate_sgid_for_one_time_use(sgid):
+            await self._send_text(event, f"❌ {validation_error}")
+            return
 
         await self._send_text(event, "⏳ 正在用本次 SGID 拉取机台成绩并同步到水鱼，请稍候...")
         try:
             result = await self.service.sync_from_sgid_to_divingfish(
-                sgid=sensitive.value,
+                sgid=sgid,
                 import_token=record.divingfish_import_token,
             )
         except Exception as exc:
@@ -268,7 +148,8 @@ class MaimaiUpdaterPlugin(Star):
                 rating=record.rating,
                 result=f"失败：{msg}",
             )
-            return self._message(f"❌ 更新失败：{msg}")
+            await self._send_text(event, f"❌ 更新失败：{msg}")
+            return
 
         summary = f"成功，同步 {result.score_count} 条成绩"
         await self.store.set_sync_result(
@@ -287,25 +168,109 @@ class MaimaiUpdaterPlugin(Star):
         if result.player_warning:
             lines.append(f"⚠️ {result.player_warning}")
         if not result.player_name:
-            lines.append("⚠️ 未能从官方接口确认玩家名，请检查更新后的 B50 是否符合本人。")
-        return self._message("\n".join(lines))
+            lines.append("⚠️ 当前机台数据源未返回官方玩家名，请以更新后的 B50 是否符合本人为准。")
+        await self._send_text(event, "\n".join(lines))
 
-    @command("maimai_status", alias={"水鱼状态"})
+    @command("maimaitoken", alias={"水鱼token"})
+    async def bind_token(self, event: AstrMessageEvent, token: str = ""):
+        token = (token or "").strip()
+        if not token:
+            return self._message(
+                "用法：maimaitoken <水鱼 Import-Token>\n"
+                "群聊中我会尝试撤回包含 Token 的消息。"
+            )
+
+        await self._recall_current_message(event)
+        event.stop_event()
+
+        if not is_probable_import_token(token):
+            await self._send_text(
+                event,
+                "❌ 水鱼 Import-Token 格式看起来不正确，请确认长度约 100-180 字符且只包含字母、数字、_、-。",
+            )
+            return
+
+        await self.store.set_import_token(self._user_key(event), token)
+        await self._send_text(
+            event,
+            f"✅ 水鱼 Token 绑定成功：{mask_secret(token)}\n"
+            "之后发送本次官方二维码识别出的 SGID 即可更新 B50。",
+        )
+
+    @command("maimaiupdate", alias={"更新水鱼", "更新b50"})
+    async def update_scores(self, event: AstrMessageEvent, sgid_text: str = ""):
+        sgid = extract_sgid(sgid_text or "")
+        if not sgid:
+            prefix = self.sgid_update_prefix
+            example = f"{prefix}SGWCMAID..." if prefix else "SGWCMAID..."
+            return self._message(
+                "用法：maimaiupdate <SGID>\n"
+                f"更简单的方式：直接发送 {example} 即可更新。"
+            )
+
+        await self._recall_current_message(event)
+        event.stop_event()
+        await self._update_from_sgid(event, sgid)
+
+    @command("maimaiclear", alias={"清空水鱼"})
+    async def clear_scores(self, event: AstrMessageEvent, confirm: str = ""):
+        if not self.enable_clear_command:
+            return self._message("当前配置已关闭清空水鱼命令。")
+
+        if confirm not in {"confirm", "确认", "确认清空"}:
+            return self._message(
+                "此操作会向水鱼发送清空成绩请求。\n"
+                "确认要清空时请执行：maimaiclear 确认清空"
+            )
+
+        user_key = self._user_key(event)
+        record = self.store.get(user_key)
+        if not record.divingfish_import_token:
+            return self._message(
+                "❌ 尚未绑定水鱼 Import-Token。\n"
+                "请先执行 maimaitoken <水鱼 Import-Token>。"
+            )
+
+        await self._send_text(event, "⏳ 正在向水鱼发送清空成绩请求，请稍候...")
+        try:
+            await self.service.clear_divingfish_scores(
+                import_token=record.divingfish_import_token,
+            )
+        except Exception as exc:
+            logger.exception("[MaimaiUpdater] clear failed")
+            msg = self.service.describe_error(exc)
+            await self.store.set_sync_result(
+                user_key,
+                player_name=record.player_name,
+                rating=record.rating,
+                result=f"清空失败：{msg}",
+            )
+            return self._message(f"❌ 清空失败：{msg}")
+
+        await self.store.clear_local_profile(
+            user_key,
+            result="已向水鱼发送清空成绩请求",
+        )
+        return self._message("✅ 已向水鱼发送清空成绩请求。重新发送新的 SGID 即可再次更新 B50。")
+
+    @command("maimaistatus", alias={"水鱼状态"})
     async def status(self, event: AstrMessageEvent):
         record = self.store.get(self._user_key(event))
+        prefix = self.sgid_update_prefix
+        trigger = f"{prefix}SGWCMAID..." if prefix else "SGWCMAID..."
         lines = ["📋 maimai 水鱼更新状态"]
-        lines.append("官方 SGID：不保存，每次绑定/更新都需要临时提供")
+        lines.append(f"SGID 更新触发：{trigger}")
+        lines.append("官方 SGID：不保存，每次更新都需要临时提供")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
         if record.player_name or record.rating:
             lines.append(f"玩家名：{record.player_name or '未知'}")
             lines.append(f"Rating：{record.rating}")
-        lines.append(f"最近验证：{format_ts(record.bound_at)}")
         lines.append(f"上次更新：{format_ts(record.last_sync_at)}")
         if record.last_sync_result:
             lines.append(f"上次结果：{record.last_sync_result}")
         return self._message("\n".join(lines))
 
-    @command("maimai_unbind", alias={"水鱼解绑"})
+    @command("maimaiunbind", alias={"水鱼解绑"})
     async def unbind(self, event: AstrMessageEvent):
         removed = await self.store.remove(self._user_key(event))
         if removed:
@@ -313,25 +278,14 @@ class MaimaiUpdaterPlugin(Star):
         return self._message("当前没有保存的绑定信息。")
 
     @event_message_type(EventMessageType.ALL)
-    async def handle_pending_bind_message(self, event: AstrMessageEvent):
-        user_key = self._user_key(event)
-        pending = self._pending_binds.get(user_key)
-        if not pending:
-            return
-
-        sgid = extract_sgid(event.message_str or "")
+    async def handle_direct_sgid_update(self, event: AstrMessageEvent):
+        sgid = self._extract_direct_update_sgid(event.message_str or "")
         if not sgid:
             return
 
-        recall = await self.recaller.recall_sensitive(event)
-        await self._send_recall_notice(event, recall)
-        if not pending.future.done():
-            pending.future.set_result(SensitiveInput(value=sgid, recall=recall))
+        await self._recall_current_message(event)
         event.stop_event()
+        await self._update_from_sgid(event, sgid)
 
     async def terminate(self):
-        for pending in list(self._pending_binds.values()):
-            if not pending.future.done():
-                pending.future.cancel()
-        self._pending_binds.clear()
         await self.service.close()

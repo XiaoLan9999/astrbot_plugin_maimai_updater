@@ -235,6 +235,13 @@ class MaimaiService:
             import_token,
         )
 
+    async def clear_divingfish_scores(self, *, import_token: str) -> None:
+        await self.client.updates(
+            self._identifier(credentials=import_token),
+            [],
+            provider=self._divingfish_provider(),
+        )
+
     async def close(self) -> None:
         if self._client is None:
             return

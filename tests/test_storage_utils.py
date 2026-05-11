@@ -62,6 +62,13 @@ class StorageTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(record.divingfish_import_token, "b" * 127)
             self.assertIn("同步", record.last_sync_result)
 
+            await reloaded.clear_local_profile("kook:user1", result="已清空")
+            cleared = UserStore(tmp).get("kook:user1")
+            self.assertEqual(cleared.player_name, "")
+            self.assertEqual(cleared.rating, 0)
+            self.assertEqual(cleared.divingfish_import_token, "b" * 127)
+            self.assertEqual(cleared.last_sync_result, "已清空")
+
             self.assertTrue(await reloaded.remove("kook:user1"))
             self.assertEqual(reloaded.get("kook:user1"), UserRecord())
 

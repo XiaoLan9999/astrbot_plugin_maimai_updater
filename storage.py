@@ -124,6 +124,17 @@ class UserStore:
             await self.save()
             return record
 
+    async def clear_local_profile(self, user_key: str, *, result: str) -> UserRecord:
+        async with self._lock:
+            record = self.get(user_key)
+            record.player_name = ""
+            record.rating = 0
+            record.last_sync_at = now_ts()
+            record.last_sync_result = result
+            self._users[user_key] = record
+            await self.save()
+            return record
+
     async def remove(self, user_key: str) -> bool:
         async with self._lock:
             existed = user_key in self._users

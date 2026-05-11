@@ -138,6 +138,15 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.rating, 14370)
         self.assertIn("不提供官方玩家名", result.player_warning)
 
+    async def test_clear_divingfish_scores_sends_empty_score_list(self):
+        service = self.make_service()
+        await service.clear_divingfish_scores(import_token="import-token")
+
+        identifier, scores, provider = service.client.updated
+        self.assertEqual(identifier.credentials, "import-token")
+        self.assertEqual(scores, [])
+        self.assertIsInstance(provider, FakeDivingFishProvider)
+
     async def test_describe_dependency_syntax_error(self):
         service = self.make_service()
         syntax_error = SyntaxError("bad syntax")

@@ -1,30 +1,51 @@
 # AstrBot maimai 水鱼更新器
 
-这是一个独立 AstrBot 插件，用于把舞萌 DX 官方机台成绩同步到水鱼查分器。
+这是一个独立 AstrBot 插件，用一次性的舞萌 DX 官方二维码识别文本 `SGWCMAID/SGID`，把机台成绩同步到水鱼查分器。
+
+![maimai 水鱼更新流程](assets/maimai-updater-flow.png)
 
 ## 功能
 
-- `/maimai_bind` / `舞萌绑定` / `水鱼绑定`：等待用户发送官方二维码识别出的 `SGWCMAID/SGID` 文本，只验证本次二维码能否解析，不保存 SGID 或官方临时凭据。
-- `/maimai_token <Import-Token>` / `水鱼token`：保存水鱼 Import-Token。
-- `/maimai_update` / `更新水鱼` / `更新b50`：要求用户再次发送本次操作用的 `SGWCMAID/SGID`，从机台数据源拉取成绩并更新到水鱼。
-- `/maimai_status` / `水鱼状态`：查看水鱼 Token、最近验证、最近同步状态，Token 只脱敏展示。
-- `/maimai_unbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
+- `maimaitoken <Import-Token>` / `水鱼token`：保存用户自己的水鱼 Import-Token。
+- 直接发送 `SGWCMAID...`：用这次官方二维码拉取成绩并更新水鱼。
+- `maimaiupdate <SGID>` / `更新水鱼` / `更新b50`：等价于直接发送 SGID，保留给需要显式命令的场景。
+- `maimaiclear 确认清空` / `清空水鱼 确认清空`：向水鱼发送清空成绩请求，用于误用他人 SGID 后手动处理。
+- `maimaistatus` / `水鱼状态`：查看 token 绑定状态、最近同步结果和当前 SGID 触发方式。
+- `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
 
-群聊中收到 SGID 或 Token 后会尽量自动撤回并阻止继续分发（需要 Bot 有撤回/管理消息权限）；私聊不会撤回。插件会单独发送“已尝试撤回消息，如果没撤回请手动撤回”的安全提示，不会把撤回提示粘在绑定结果里。
+命令名已去除下划线。插件不再提供 `maimai_bind`，因为官方 SGID 只适合一次性使用，每次更新都需要用户重新提供新的二维码识别文本。
 
-## 重要说明
+## SGID 触发前缀
 
-舞萌官方二维码识别出的 SGID 以及 maimai.py 解析出的官方临时凭据都不适合作为长期凭据保存。它们用于本次机台登录/查询链路，复用可能失败，也可能影响玩家在机台正常登录。
+插件配置里可以设置 `sgid_update_prefix`：
 
-因此本插件只持久化水鱼 Import-Token 和展示用状态，不持久化 SGID，也不持久化 `arcade_credentials`。每次执行 `/maimai_update` 都需要用户重新提供一次新的官方二维码识别文本。
+- 留空：用户直接发送 `SGWCMAID...` 就会更新。
+- 填 `/`：用户需要发送 `/SGWCMAID...` 才会更新。
 
-插件会校验 SGID 内嵌时间戳，默认只接受 180 秒内生成的 SGID；同一条 SGID 在插件进程内只能使用一次。不要复用旧二维码文本，否则可能得到异常或污染的成绩。
+这个前缀只影响“直发 SGID 更新”，不改变 AstrBot 自身的命令前缀规则。
 
-`/maimai_bind` 不会读取玩家名/Rating，因为当前 maimai.py 的官方玩家资料预览接口可能已和华立标题服返回格式不兼容。玩家名只会在更新流程中尽量从官方/机台数据源读取；插件不会从水鱼反查玩家名。Rating 会优先使用官方玩家资料里的数值，读不到时使用本次官方成绩计算出的 B50 Rating。
+## 安全说明
 
-更新成绩前会禁用 maimai.py 的 Yuzu 别名数据源预加载，避免 `api.yuzuchan.moe` 返回 403 时影响成绩同步。
+舞萌官方二维码识别出的 SGID，以及 maimai.py 解析出的官方临时凭据，都不适合长期保存。复用旧 SGID 可能失败，也可能影响玩家在机台正常登录。
 
-如果你的网络无法解析华立标题服域名，可以在 Windows hosts 中加入下面的映射：
+因此本插件只持久化水鱼 Import-Token 和展示状态，不持久化 SGID，也不持久化 `arcade_credentials`。插件会校验 SGID 内嵌时间戳，默认只接受 180 秒内生成的 SGID；同一条 SGID 在插件进程内也只允许使用一次。
+
+群聊中收到 SGID 或 Token 后，插件会尝试撤回原消息，并单独发送“已尝试撤回消息，如果没撤回请手动撤回”。私聊不会撤回。
+
+## 玩家名说明
+
+玩家名只能从官方/机台数据源读取，插件不会从水鱼反查玩家名。当前 maimai.py 的新版机台成绩链路可以同步成绩，但玩家资料预览能力受华立标题服接口变化影响，可能无法返回玩家名。读不到玩家名时，更新仍会继续，Rating 会尽量使用本次官方成绩链路返回的值。
+
+## 运行环境
+
+插件代码本身没有固定操作系统要求，只要 AstrBot 和依赖能正常安装即可。实际部署时需要注意：
+
+- Python 需要满足 `maimai-py` 的要求；当前依赖版本要求 Python `>=3.9,<4.0`。
+- 读取官方机台数据依赖 `maimai-ffi`，它是二进制 wheel；系统、CPU 架构和 Python 版本必须有对应 wheel。
+- 本仓库的 `requirements.txt` 固定 `maimai-py==1.4.2`，该版本依赖 `maimai-ffi==0.7.0`。
+- 已确认 Windows x64 + Python 3.10 可下载 `maimai_ffi-0.7.0-cp310-cp310-win_amd64` wheel。
+
+如果网络无法解析华立标题服域名，可以在 Windows hosts 中加入：
 
 ```text
 43.137.89.146 wq.sys-all.cn
@@ -33,19 +54,9 @@
 43.137.89.146 at.sys-all.cn
 ```
 
-## 运行环境
-
-插件代码本身没有固定操作系统要求，只要 AstrBot 和依赖能正常安装即可。实际部署时需要注意的是：
-
-- Python 需要满足 `maimai-py` 的要求；当前依赖版本要求 Python `>=3.9,<4.0`。
-- 读取官方机台数据依赖 `maimai-ffi`，它是二进制 wheel；你的系统、CPU 架构和 Python 版本必须有对应 wheel。
-- 本仓库的 `requirements.txt` 固定 `maimai-py==1.4.2`，该版本依赖 `maimai-ffi==0.7.0`。
-- 已确认 `maimai-ffi==0.7.0` 可为 Windows x64 + Python 3.10 下载到 `maimai_ffi-0.7.0-cp310-cp310-win_amd64` wheel。
-- 如果你在 Linux/Docker 或其它 Python 版本部署，优先直接安装 `requirements.txt`；如果 `maimai-ffi` 安装失败，请调整 Python 版本，或根据 `maimai-ffi`/`maimai-py` 当前 wheel 支持情况选择匹配版本。
-
 ## 数据
 
-插件数据保存到 AstrBot 标准插件数据目录下的 `users.json`。本项目的数据是明文保存；日志不会输出完整 SGID、Import-Token 或官方临时凭据。
+插件数据保存到 AstrBot 标准插件数据目录下的 `users.json`，明文保存。日志不会输出完整 SGID、Import-Token 或官方临时凭据。
 
 `users.json` 只保存：
 
@@ -60,7 +71,7 @@
 
 ## 排障
 
-如果绑定时报 `SyntaxError`、`maimai-py/maimai-ffi 依赖导入失败`，通常是 AstrBot 运行环境里的依赖版本冲突或安装残留。进入 AstrBot 使用的 Python 环境后，在插件目录执行：
+如果安装或更新依赖时报 `SyntaxError`、`maimai-py/maimai-ffi 依赖导入失败`，通常是 AstrBot 运行环境里的依赖版本冲突或安装残留。进入 AstrBot 使用的 Python 环境后，在插件目录执行：
 
 ```bash
 python -m pip uninstall -y maimai-py maimai-ffi maimai_py
@@ -73,9 +84,7 @@ python -m pip install --no-cache-dir -r requirements.txt
 python -m pip install --no-cache-dir "maimai-py==1.4.2" "httpx>=0.28.0,<0.29.0"
 ```
 
-如果日志里还出现 `maimai_py.providers.arcade.py` 的 `get_player` 或 `models.py` 的 `_raise_for_error`，说明 AstrBot 当前进程仍在使用旧版 maimai-py。请完全关闭 AstrBot 后重新安装依赖并重启。
-
-可以用下面的命令检查 AstrBot 当前 Python 里实际安装的版本：
+检查当前 Python 中实际安装版本：
 
 ```powershell
 python -c "import importlib.metadata as m; print('maimai-py', m.version('maimai-py')); print('maimai-ffi', m.version('maimai-ffi'))"
@@ -83,12 +92,12 @@ python -c "import importlib.metadata as m; print('maimai-py', m.version('maimai-
 
 ### Windows 提示 `[WinError 5] 拒绝访问 arcade.cp310-win_amd64.pyd`
 
-这是 Windows 正在锁定 `maimai_ffi` 的二进制扩展文件，通常是因为 AstrBot 当前进程已经加载过 `maimai_ffi`。不要在 AstrBot 运行中覆盖安装这个依赖。
+这是 Windows 正在锁定 `maimai_ffi` 的二进制扩展文件，通常因为 AstrBot 进程已经加载过它。不要在 AstrBot 运行中覆盖安装这个依赖。
 
 处理方式：
 
 1. 完全关闭 AstrBot Launcher 和所有 AstrBot/Python 进程。
-2. 打开一个新的 PowerShell。
+2. 打开新的 PowerShell。
 3. 使用 AstrBot 同一个 Python 执行：
 
 ```powershell

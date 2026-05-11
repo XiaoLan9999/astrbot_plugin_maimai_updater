@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" role="img" aria-labelledby="title desc">
+  <title id="title">AstrBot maimai 水鱼更新流程</title>
+  <desc id="desc">天蓝色配色的插件使用流程图，底部带 Designed by XiaoLan9999 水印。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8fbff"/>
+      <stop offset="52%" stop-color="#bceeff"/>
+      <stop offset="100%" stop-color="#82d4ff"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e9f9ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-12%" y="-16%" width="124%" height="132%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#2f8fbd" flood-opacity="0.18"/>
+    </filter>
+    <pattern id="dots" width="36" height="36" patternUnits="userSpaceOnUse">
+      <circle cx="8" cy="8" r="2" fill="#ffffff" opacity="0.55"/>
+      <circle cx="25" cy="26" r="1.8" fill="#3aa9dd" opacity="0.25"/>
+    </pattern>
+  </defs>
+
+  <rect width="1400" height="860" fill="url(#bg)"/>
+  <rect width="1400" height="860" fill="url(#dots)" opacity="0.72"/>
+  <path d="M0 690 C160 620 260 745 420 680 C610 603 760 705 930 650 C1110 592 1240 650 1400 606 L1400 860 L0 860 Z" fill="#f2fdff" opacity="0.72"/>
+  <path d="M0 728 C180 665 280 785 460 724 C640 664 760 742 940 704 C1125 665 1250 712 1400 674 L1400 860 L0 860 Z" fill="#d8f6ff" opacity="0.82"/>
+
+  <text x="700" y="86" text-anchor="middle" font-family="'Microsoft YaHei', 'Noto Sans SC', Arial, sans-serif" font-size="48" font-weight="800" fill="#116b9c">maimai 水鱼更新器</text>
+  <text x="700" y="132" text-anchor="middle" font-family="'Microsoft YaHei', 'Noto Sans SC', Arial, sans-serif" font-size="24" fill="#2f7ea8">绑定水鱼 Token 后，直接发送本次 SGID 更新 B50</text>
+
+  <g font-family="'Microsoft YaHei', 'Noto Sans SC', Arial, sans-serif">
+    <g filter="url(#shadow)">
+      <rect x="72" y="220" width="288" height="250" rx="24" fill="url(#card)" stroke="#6ac8f2" stroke-width="3"/>
+      <circle cx="118" cy="266" r="26" fill="#1ba7e1"/>
+      <text x="118" y="276" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">1</text>
+      <text x="150" y="258" font-size="27" font-weight="800" fill="#12658f">绑定水鱼</text>
+      <text x="112" y="318" font-size="22" fill="#245f7a">maimaitoken</text>
+      <text x="112" y="354" font-size="22" fill="#245f7a">&lt;Import-Token&gt;</text>
+      <text x="112" y="406" font-size="20" fill="#5c8798">只保存水鱼 Token</text>
+    </g>
+
+    <path d="M374 344 L456 344" stroke="#179ed5" stroke-width="7" stroke-linecap="round"/>
+    <path d="M456 344 L432 328 L432 360 Z" fill="#179ed5"/>
+
+    <g filter="url(#shadow)">
+      <rect x="474" y="220" width="288" height="250" rx="24" fill="url(#card)" stroke="#6ac8f2" stroke-width="3"/>
+      <circle cx="520" cy="266" r="26" fill="#1ba7e1"/>
+      <text x="520" y="276" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">2</text>
+      <text x="552" y="258" font-size="27" font-weight="800" fill="#12658f">获取 SGID</text>
+      <text x="514" y="318" font-size="22" fill="#245f7a">官方公众号 / 网页</text>
+      <text x="514" y="354" font-size="22" fill="#245f7a">识别二维码文本</text>
+      <text x="514" y="406" font-size="20" fill="#5c8798">180 秒内使用</text>
+    </g>
+
+    <path d="M776 344 L858 344" stroke="#179ed5" stroke-width="7" stroke-linecap="round"/>
+    <path d="M858 344 L834 328 L834 360 Z" fill="#179ed5"/>
+
+    <g filter="url(#shadow)">
+      <rect x="876" y="220" width="288" height="250" rx="24" fill="url(#card)" stroke="#6ac8f2" stroke-width="3"/>
+      <circle cx="922" cy="266" r="26" fill="#1ba7e1"/>
+      <text x="922" y="276" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">3</text>
+      <text x="954" y="258" font-size="27" font-weight="800" fill="#12658f">直接更新</text>
+      <text x="916" y="318" font-size="22" fill="#245f7a">发送 SGWCMAID...</text>
+      <text x="916" y="354" font-size="22" fill="#245f7a">或 /SGWCMAID...</text>
+      <text x="916" y="406" font-size="20" fill="#5c8798">群聊自动尝试撤回</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="286" y="540" width="828" height="150" rx="24" fill="#ffffff" opacity="0.94" stroke="#79d6f7" stroke-width="3"/>
+      <text x="340" y="595" font-size="28" font-weight="800" fill="#12658f">完成后</text>
+      <text x="340" y="642" font-size="23" fill="#245f7a">水鱼数据已更新，可以继续用现有 B50 插件查询。</text>
+      <text x="340" y="676" font-size="20" fill="#5c8798">插件不保存 SGID，也不保存官方临时凭据。</text>
+      <path d="M1010 607 C1048 606 1074 626 1082 657 C1038 670 997 650 994 616 C997 611 1002 608 1010 607 Z" fill="#1ba7e1" opacity="0.18"/>
+      <circle cx="1050" cy="614" r="12" fill="#1ba7e1" opacity="0.32"/>
+    </g>
+  </g>
+
+  <text x="700" y="812" text-anchor="middle" font-family="'Microsoft YaHei', 'Noto Sans SC', Arial, sans-serif" font-size="24" font-weight="700" fill="#158fca" opacity="0.9">Designed by XiaoLan9999</text>
+</svg>
