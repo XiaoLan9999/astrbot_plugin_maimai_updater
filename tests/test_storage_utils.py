@@ -13,15 +13,22 @@ from astrbot_plugin_maimai_updater.utils import (
     is_probable_import_token,
     is_probable_sgid,
     mask_secret,
+    sgid_issued_at,
+    validate_sgid_freshness,
 )
 
 
 class UtilsTest(unittest.TestCase):
     def test_extract_and_validate_sgid(self):
-        sgid = "SGWCMAID0123456789abcdef"
+        sgid = "SGWCMAID260511231203abcdef"
         self.assertEqual(extract_sgid(f"请绑定 {sgid}"), sgid)
         self.assertTrue(is_probable_sgid(sgid))
         self.assertFalse(is_probable_sgid("not-a-sgid"))
+        issued_at = sgid_issued_at(sgid)
+        self.assertIsNotNone(issued_at)
+        self.assertTrue(validate_sgid_freshness(sgid, now=issued_at + 120).ok)
+        self.assertFalse(validate_sgid_freshness(sgid, now=issued_at + 301).ok)
+        self.assertFalse(validate_sgid_freshness("SGWCMAIDbad", now=issued_at).ok)
 
     def test_token_validation_and_masking(self):
         token = "a" * 127

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import time
 from dataclasses import dataclass
 
 from astrbot.api import AstrBotConfig, logger
@@ -18,6 +20,7 @@ from .utils import (
     is_probable_import_token,
     is_probable_sgid,
     mask_secret,
+    validate_sgid_freshness,
 )
 
 
@@ -63,6 +66,8 @@ class MaimaiUpdaterPlugin(Star):
             kook_token=str(self.config.get("kook_token", "") or ""),
         )
         self._pending_binds: dict[str, PendingBind] = {}
+        self.sgid_max_age_seconds = self._int_config("sgid_max_age_seconds", 180)
+        self._used_sgid_hashes: dict[str, float] = {}
 
     def _int_config(self, key: str, default: int) -> int:
         try:
@@ -94,6 +99,26 @@ class MaimaiUpdaterPlugin(Star):
         old = self._pending_binds.pop(user_key, None)
         if old and not old.future.done():
             old.future.set_exception(PendingBindReplaced())
+
+    def _validate_sgid_for_one_time_use(self, sgid: str) -> str:
+        freshness = validate_sgid_freshness(
+            sgid,
+            max_age_seconds=self.sgid_max_age_seconds,
+        )
+        if not freshness.ok:
+            return freshness.message
+
+        now = time.time()
+        for digest, expires_at in list(self._used_sgid_hashes.items()):
+            if expires_at <= now:
+                self._used_sgid_hashes.pop(digest, None)
+
+        digest = hashlib.sha256(sgid.encode("utf-8")).hexdigest()
+        if digest in self._used_sgid_hashes:
+            return "这条 SGID 已经被使用过，请重新从官方公众号获取二维码后再试。"
+
+        self._used_sgid_hashes[digest] = now + max(self.sgid_max_age_seconds + 60, 300)
+        return ""
 
     async def _request_sgid(
         self,
@@ -145,6 +170,8 @@ class MaimaiUpdaterPlugin(Star):
             return self._message(
                 "❌ SGID 格式不正确，请重新执行 /maimai_bind 后发送以 SGWCMAID 开头的文本。"
             )
+        if validation_error := self._validate_sgid_for_one_time_use(sensitive.value):
+            return self._message(f"❌ {validation_error}")
 
         await self._send_text(event, "⏳ 正在解析本次二维码，请稍候...")
         try:
@@ -223,6 +250,8 @@ class MaimaiUpdaterPlugin(Star):
             return self._message(
                 "❌ SGID 格式不正确，请重新执行 /maimai_update 后发送以 SGWCMAID 开头的文本。"
             )
+        if validation_error := self._validate_sgid_for_one_time_use(sensitive.value):
+            return self._message(f"❌ {validation_error}")
 
         await self._send_text(event, "⏳ 正在用本次 SGID 拉取机台成绩并同步到水鱼，请稍候...")
         try:
@@ -257,6 +286,8 @@ class MaimaiUpdaterPlugin(Star):
         ]
         if result.player_warning:
             lines.append(f"⚠️ {result.player_warning}")
+        if not result.player_name:
+            lines.append("⚠️ 未能从官方接口确认玩家名，请检查更新后的 B50 是否符合本人。")
         return self._message("\n".join(lines))
 
     @command("maimai_status", alias={"水鱼状态"})
