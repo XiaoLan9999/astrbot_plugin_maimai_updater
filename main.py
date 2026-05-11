@@ -41,7 +41,7 @@ class SensitiveInput:
     "astrbot_plugin_maimai_updater",
     "User",
     "绑定舞萌官方二维码凭据和水鱼 Import-Token，并把机台成绩同步到水鱼。",
-    "0.1.0",
+    "0.1.1",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -132,7 +132,7 @@ class MaimaiUpdaterPlugin(Star):
         try:
             result = await self.service.bind_from_sgid(sensitive.value)
         except Exception as exc:
-            logger.warning("[MaimaiUpdater] bind failed: %s", exc.__class__.__name__)
+            logger.exception("[MaimaiUpdater] bind failed")
             return self._message(
                 f"❌ 绑定失败：{self.service.describe_error(exc)}"
                 + self._recall_warning(sensitive.recall)
@@ -203,7 +203,7 @@ class MaimaiUpdaterPlugin(Star):
                 import_token=record.divingfish_import_token,
             )
         except Exception as exc:
-            logger.warning("[MaimaiUpdater] update failed: %s", exc.__class__.__name__)
+            logger.exception("[MaimaiUpdater] update failed")
             msg = self.service.describe_error(exc)
             await self.store.set_sync_result(
                 user_key,

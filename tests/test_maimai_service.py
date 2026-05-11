@@ -6,7 +6,10 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from astrbot_plugin_maimai_updater.maimai_service import MaimaiService
+from astrbot_plugin_maimai_updater.maimai_service import (
+    MaimaiDependencyError,
+    MaimaiService,
+)
 
 
 class FakeIdentifier:
@@ -87,6 +90,19 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identifier.credentials, "import-token")
         self.assertEqual(scores, ["score1", "score2"])
         self.assertIsInstance(provider, FakeDivingFishProvider)
+
+    async def test_describe_dependency_syntax_error(self):
+        service = self.make_service()
+        syntax_error = SyntaxError("bad syntax")
+        syntax_error.filename = "__init__.py"
+        syntax_error.lineno = 94
+        exc = MaimaiDependencyError("依赖导入失败")
+        exc.__cause__ = syntax_error
+
+        message = service.describe_error(exc)
+        self.assertIn("依赖导入失败", message)
+        self.assertIn("__init__.py", message)
+        self.assertIn("line 94", message)
 
 
 if __name__ == "__main__":

@@ -49,6 +49,11 @@ class MaimaiService:
                 TitleServerError,
             )
             import httpx
+        except SyntaxError as exc:
+            raise MaimaiDependencyError(
+                "maimai-py/maimai-ffi 依赖导入失败，当前安装可能版本冲突或文件损坏。"
+                "请在 AstrBot 的 Python 环境中重新安装 requirements.txt。"
+            ) from exc
         except ImportError as exc:
             raise MaimaiDependencyError(
                 "缺少 maimai-py 依赖，请先安装插件 requirements.txt。"
@@ -135,6 +140,10 @@ class MaimaiService:
 
     def describe_error(self, exc: BaseException) -> str:
         if isinstance(exc, MaimaiDependencyError):
+            root = exc.__cause__
+            if isinstance(root, SyntaxError):
+                file_name = root.filename or "未知文件"
+                return f"{exc} 原始错误：SyntaxError: {root.msg} ({file_name}, line {root.lineno})"
             return str(exc)
 
         imports = self._imports or {}
@@ -152,4 +161,3 @@ class MaimaiService:
             if cls and isinstance(exc, cls):
                 return message
         return f"操作失败：{exc.__class__.__name__}: {exc}"
-

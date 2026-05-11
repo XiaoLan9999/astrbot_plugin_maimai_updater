@@ -25,3 +25,13 @@
 
 插件数据保存到 AstrBot 标准插件数据目录下的 `users.json`。本项目的数据是明文保存；日志不会输出完整 SGID、Import-Token 或机台凭据。
 
+## 排障
+
+如果绑定时报 `SyntaxError`、`maimai-py/maimai-ffi 依赖导入失败`，通常是 AstrBot 运行环境里的依赖版本冲突或安装残留。进入 AstrBot 使用的 Python 环境后，在插件目录执行：
+
+```bash
+python -m pip uninstall -y maimai-py maimai-ffi maimai_py
+python -m pip install --no-cache-dir -r requirements.txt
+```
+
+如果群聊敏感消息撤回失败，请检查 Bot 是否有撤回/管理消息权限。插件会在日志里输出撤回失败 traceback，便于判断是权限、message_id，还是平台适配器不支持。

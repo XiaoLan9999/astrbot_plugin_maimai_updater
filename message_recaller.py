@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from astrbot.api import logger
+except ImportError:  # pragma: no cover - used by local unit tests outside AstrBot
+    import logging
+
+    logger = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class RecallResult:
@@ -63,6 +70,18 @@ class MessageRecaller:
     def _message_id(event: Any) -> str:
         msg_obj = getattr(event, "message_obj", None)
         value = getattr(msg_obj, "message_id", "") if msg_obj is not None else ""
+        if value:
+            return str(value)
+        raw = getattr(msg_obj, "raw_message", None) if msg_obj is not None else None
+        if isinstance(raw, dict):
+            for key in ("message_id", "msg_id", "id"):
+                if raw.get(key):
+                    return str(raw[key])
+            data = raw.get("data")
+            if isinstance(data, dict):
+                for key in ("message_id", "msg_id", "id"):
+                    if data.get(key):
+                        return str(data[key])
         return str(value or "")
 
     @staticmethod
@@ -83,7 +102,7 @@ class MessageRecaller:
 
     def _find_platform_inst(self, platform_name: str) -> Any | None:
         getter = getattr(self.context, "get_platform_inst", None)
-        if callable(getter):
+        if callable(getter) and platform_name:
             try:
                 inst = getter(platform_name)
                 if inst:
@@ -127,6 +146,7 @@ class MessageRecaller:
             if resp.status_code == 200 and resp.json().get("code") == 0:
                 return RecallResult(True, True)
         except Exception:
+            logger.exception("[MaimaiUpdater] KOOK recall failed")
             return RecallResult(True, False, "KOOK 撤回失败，请手动撤回敏感消息。")
         return RecallResult(True, False, "KOOK 撤回失败，请确认 Bot 拥有管理消息权限。")
 
@@ -140,4 +160,5 @@ class MessageRecaller:
             await client.call_action("delete_msg", message_id=message_id)
             return RecallResult(True, True)
         except Exception:
+            logger.exception("[MaimaiUpdater] OneBot recall failed")
             return RecallResult(True, False, "消息撤回失败，请确认 Bot 拥有撤回权限并手动撤回敏感消息。")
