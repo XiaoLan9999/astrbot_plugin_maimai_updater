@@ -4,7 +4,7 @@
 
 ## 功能
 
-- `/maimai_bind` / `舞萌绑定` / `水鱼绑定`：等待用户发送官方二维码识别出的 `SGWCMAID/SGID` 文本，只做本次解析和账号验证，不保存 SGID 或官方临时凭据。
+- `/maimai_bind` / `舞萌绑定` / `水鱼绑定`：等待用户发送官方二维码识别出的 `SGWCMAID/SGID` 文本，只验证本次二维码能否解析，不保存 SGID 或官方临时凭据。
 - `/maimai_token <Import-Token>` / `水鱼token`：保存水鱼 Import-Token。
 - `/maimai_update` / `更新水鱼` / `更新b50`：要求用户再次发送本次操作用的 `SGWCMAID/SGID`，从机台数据源拉取成绩并更新到水鱼。
 - `/maimai_status` / `水鱼状态`：查看水鱼 Token、最近验证、最近同步状态，Token 只脱敏展示。
@@ -18,7 +18,7 @@
 
 因此本插件只持久化水鱼 Import-Token 和展示用状态，不持久化 SGID，也不持久化 `arcade_credentials`。每次执行 `/maimai_update` 都需要用户重新提供一次新的官方二维码识别文本。
 
-玩家名只会从官方/机台数据源读取；如果当前 maimai.py 机台数据源没有暴露玩家资料接口，插件不会从水鱼反查玩家名。Rating 会优先使用官方玩家资料里的数值，读不到时使用本次官方成绩计算出的 B50 Rating。
+`/maimai_bind` 不会读取玩家名/Rating，因为当前 maimai.py 的官方玩家资料预览接口可能已和华立标题服返回格式不兼容。玩家名只会在更新流程中尽量从官方/机台数据源读取；插件不会从水鱼反查玩家名。Rating 会优先使用官方玩家资料里的数值，读不到时使用本次官方成绩计算出的 B50 Rating。
 
 ## 运行环境
 

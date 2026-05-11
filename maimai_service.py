@@ -17,8 +17,6 @@ class MaimaiDependencyError(RuntimeError):
 
 @dataclass(slots=True)
 class BindResult:
-    player_name: str
-    rating: int
     player_warning: str = ""
 
 
@@ -111,30 +109,8 @@ class MaimaiService:
         return self._identifier(credentials=arcade_credentials), arcade_credentials
 
     async def bind_from_sgid(self, sgid: str) -> BindResult:
-        arcade_identifier, _ = await self._arcade_identifier_from_sgid(sgid)
-        player_name = ""
-        rating = 0
-        player_warning = ""
-        arcade_provider = self._arcade_provider()
-        if hasattr(arcade_provider, "get_player"):
-            try:
-                player = await self.client.players(
-                    arcade_identifier,
-                    provider=arcade_provider,
-                )
-                player_name = str(getattr(player, "name", "") or "")
-                rating = int(getattr(player, "rating", 0) or 0)
-            except Exception as exc:
-                self._log_nonfatal_arcade_player_error(exc, stage="bind")
-                player_warning = f"二维码已解析，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
-        else:
-            player_warning = "二维码已解析；当前 maimai-py 机台数据源不提供玩家名/Rating 预览。"
-
-        return BindResult(
-            player_name=player_name,
-            rating=rating,
-            player_warning=player_warning,
-        )
+        await self._arcade_identifier_from_sgid(sgid)
+        return BindResult()
 
     async def _sync_arcade_identifier_to_divingfish(
         self,

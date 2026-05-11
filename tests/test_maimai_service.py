@@ -79,33 +79,13 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         service._client = FakeClient(fail_players=fail_players)
         return service
 
-    async def test_bind_from_sgid_uses_qrcode_credentials(self):
+    async def test_bind_from_sgid_only_validates_qrcode(self):
         service = self.make_service()
         result = await service.bind_from_sgid("SGWCMAID-test")
 
-        self.assertEqual(result.player_name, "XiAoLan")
-        self.assertEqual(result.rating, 14370)
+        self.assertEqual(result.player_warning, "")
         self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
-        identifier, provider = service.client.player_input
-        self.assertEqual(identifier.credentials, "arcade-credentials")
-        self.assertIsInstance(provider, FakeArcadeProvider)
-
-    async def test_bind_from_sgid_keeps_credentials_when_preview_fails(self):
-        service = self.make_service(fail_players=True)
-        with patch("astrbot_plugin_maimai_updater.maimai_service.logger.warning") as warning:
-            result = await service.bind_from_sgid("SGWCMAID-test")
-
-        self.assertEqual(result.player_name, "")
-        self.assertEqual(result.rating, 0)
-        self.assertIn("玩家名/Rating", result.player_warning)
-        warning.assert_called_once()
-        self.assertIn("bind", warning.call_args.args[1:])
-
-    async def test_bind_from_sgid_allows_arcade_provider_without_player_preview(self):
-        service = self.make_service(arcade_provider=FakeArcadeProviderWithoutPlayer)
-        result = await service.bind_from_sgid("SGWCMAID-test")
-
-        self.assertIn("不提供玩家名/Rating", result.player_warning)
+        self.assertFalse(hasattr(service.client, "player_input"))
 
     async def test_sync_from_sgid_to_divingfish_uses_fresh_qrcode(self):
         service = self.make_service()

@@ -146,7 +146,7 @@ class MaimaiUpdaterPlugin(Star):
                 "❌ SGID 格式不正确，请重新执行 /maimai_bind 后发送以 SGWCMAID 开头的文本。"
             )
 
-        await self._send_text(event, "⏳ 正在解析本次二维码并获取玩家信息，请稍候...")
+        await self._send_text(event, "⏳ 正在解析本次二维码，请稍候...")
         try:
             result = await self.service.bind_from_sgid(sensitive.value)
         except Exception as exc:
@@ -157,15 +157,14 @@ class MaimaiUpdaterPlugin(Star):
 
         await self.store.set_player_profile(
             user_key,
-            player_name=result.player_name,
-            rating=result.rating,
+            player_name="",
+            rating=0,
         )
         lines = [
-            "✅ 官方账号验证成功！\n"
-            f"玩家名：{result.player_name or '未知'}\n"
-            f"Rating：{result.rating}\n"
+            "✅ 官方二维码验证成功！\n"
             "我不会保存本次 SGID 或官方临时凭据。之后更新水鱼仍需重新提供一次 SGID。\n"
-            "接下来可发送 /maimai_token <水鱼 Import-Token>，再用 /maimai_update 更新水鱼。"
+            "接下来可发送 /maimai_token <水鱼 Import-Token>，再用 /maimai_update 更新水鱼。\n"
+            "玩家名/Rating 会在更新时尽量从官方成绩链路获取。"
         ]
         if result.player_warning:
             lines.append(f"⚠️ {result.player_warning}")
