@@ -121,7 +121,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.score_count, 2)
         self.assertEqual(result.rating, 14370)
-        self.assertIn("官方玩家名/Rating", result.player_warning)
+        self.assertEqual(result.player_warning, "当前数据源不提供官方玩家名预览。")
         self.assertIsNotNone(service.client.updated)
         warning.assert_called_once()
         self.assertIn("update", warning.call_args.args[1:])
@@ -136,7 +136,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.score_count, 2)
         self.assertEqual(result.player_name, "")
         self.assertEqual(result.rating, 14370)
-        self.assertIn("不提供官方玩家名", result.player_warning)
+        self.assertEqual(result.player_warning, "当前数据源不提供官方玩家名预览。")
 
     async def test_clear_divingfish_scores_sends_empty_score_list(self):
         service = self.make_service()

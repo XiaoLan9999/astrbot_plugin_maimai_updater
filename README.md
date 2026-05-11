@@ -6,10 +6,10 @@
 
 ## 功能
 
-- `maimaitoken <Import-Token>` / `水鱼token`：保存用户自己的水鱼 Import-Token。
-- `更新水鱼 SGWCMAID...` / `更新b50 SGWCMAID...`：免 Bot 唤醒前缀的更新方式，可在面板中关闭。
-- `maimaiupdate <SGID>` / `更新水鱼` / `更新b50`：标准 AstrBot 命令触发方式，按你的 AstrBot 配置可能需要 `/` 等 Bot 唤醒前缀。
-- `maimaiclear 确认清空` / `清空水鱼 确认清空`：向水鱼发送清空成绩请求，用于误用他人 SGID 后手动处理。
+- `maimaitoken <Import-Token>` / `水鱼绑定` / `绑定水鱼`：保存用户自己的水鱼 Import-Token。
+- `更新水鱼 SGWCMAID...` / `水鱼更新 SGWCMAID...` / `更新b50 SGWCMAID...`：免 Bot 唤醒前缀的更新方式，可在面板中关闭。
+- `maimaiupdate <SGID>` / `更新水鱼` / `水鱼更新` / `更新b50`：标准 AstrBot 命令触发方式，按你的 AstrBot 配置可能需要 `/` 等 Bot 唤醒前缀。
+- `maimaiclear 确认清空` / `清空水鱼 确认清空` / `清空b50 确认清空`：向水鱼发送清空成绩请求，用于误用他人 SGID 后手动处理。
 - `maimaistatus` / `水鱼状态`：查看 token 绑定状态、最近同步结果和当前 SGID 触发方式。
 - `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
 
@@ -43,7 +43,7 @@
 
 ## 玩家名说明
 
-玩家名只能从官方/机台数据源读取，插件不会从水鱼反查玩家名。当前 maimai.py 的新版机台成绩链路可以同步成绩，但玩家资料预览能力受华立标题服接口变化影响，可能无法返回玩家名。读不到玩家名时，更新仍会继续，Rating 会尽量使用本次官方成绩链路返回的值。
+玩家名只能从官方/机台数据源读取，插件不会从水鱼反查玩家名。当前数据源不提供稳定的官方玩家名预览，所以插件不在结果里展示玩家名；更新仍会继续，Rating 会尽量使用本次官方成绩链路返回的值。
 
 ## 运行环境
 
@@ -69,7 +69,6 @@
 
 `users.json` 只保存：
 
-- `player_name`
 - `rating`
 - `divingfish_import_token`
 - `bound_at`

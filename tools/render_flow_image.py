@@ -127,7 +127,7 @@ def main() -> None:
         draw.line((x1, y, x2, y), fill=(23, 158, 213, 255), width=7)
         draw.polygon([(x2, y), (x2 - 24, y - 16), (x2 - 24, y + 16)], fill=(23, 158, 213, 255))
 
-    card(72, 220, 1, "绑定水鱼", "maimaitoken", "<Import-Token>", "只保存水鱼 Token")
+    card(72, 220, 1, "绑定水鱼", "水鱼绑定", "<Import-Token>", "只保存水鱼 Token")
     arrow(374, 344, 456)
     card(474, 220, 2, "获取 SGID", "官方公众号 / 网页", "识别二维码文本", "180 秒内使用")
     arrow(776, 344, 858)

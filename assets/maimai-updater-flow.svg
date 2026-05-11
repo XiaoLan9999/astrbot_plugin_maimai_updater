@@ -34,7 +34,7 @@
       <circle cx="118" cy="266" r="26" fill="#1ba7e1"/>
       <text x="118" y="276" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">1</text>
       <text x="150" y="258" font-size="27" font-weight="800" fill="#12658f">绑定水鱼</text>
-      <text x="112" y="318" font-size="22" fill="#245f7a">maimaitoken</text>
+      <text x="112" y="318" font-size="22" fill="#245f7a">水鱼绑定</text>
       <text x="112" y="354" font-size="22" fill="#245f7a">&lt;Import-Token&gt;</text>
       <text x="112" y="406" font-size="20" fill="#5c8798">只保存水鱼 Token</text>
     </g>

@@ -26,7 +26,7 @@ from .utils import (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把机台成绩同步到水鱼。",
-    "0.3.2",
+    "0.3.3",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -90,7 +90,7 @@ class MaimaiUpdaterPlugin(Star):
         content = (text or "").strip()
         if not content:
             return None
-        for command_text in ("maimaiupdate", "更新水鱼", "更新B50", "更新b50"):
+        for command_text in ("maimaiupdate", "更新水鱼", "水鱼更新", "更新B50", "更新b50"):
             if not content.startswith(command_text):
                 continue
             suffix = content[len(command_text):]
@@ -131,7 +131,7 @@ class MaimaiUpdaterPlugin(Star):
             await self._send_text(
                 event,
                 "❌ 尚未绑定水鱼 Import-Token。\n"
-                "请先执行 maimaitoken <水鱼 Import-Token> 或 水鱼token <水鱼 Import-Token>。",
+                "请先执行 maimaitoken <水鱼 Import-Token>、水鱼绑定 <水鱼 Import-Token> 或 绑定水鱼 <水鱼 Import-Token>。",
             )
             return
 
@@ -154,7 +154,6 @@ class MaimaiUpdaterPlugin(Star):
             msg = self.service.describe_error(exc)
             await self.store.set_sync_result(
                 user_key,
-                player_name=record.player_name,
                 rating=record.rating,
                 result=f"失败：{msg}",
             )
@@ -164,29 +163,26 @@ class MaimaiUpdaterPlugin(Star):
         summary = f"成功，同步 {result.score_count} 条成绩"
         await self.store.set_sync_result(
             user_key,
-            player_name=result.player_name,
             rating=result.rating,
             result=summary,
         )
         lines = [
             "✅ 水鱼更新完成！",
-            f"玩家名：{result.player_name or record.player_name or '未知'}",
             f"Rating：{result.rating or record.rating}",
             f"成绩数：{result.score_count}",
             "现在可以用你现有的 B50 插件查询最新数据。",
         ]
         if result.player_warning:
             lines.append(f"⚠️ {result.player_warning}")
-        if not result.player_name:
-            lines.append("⚠️ 当前机台数据源未返回官方玩家名，请以更新后的 B50 是否符合本人为准。")
         await self._send_text(event, "\n".join(lines))
 
-    @command("maimaitoken", alias={"水鱼token"})
+    @command("maimaitoken", alias={"水鱼绑定", "绑定水鱼"})
     async def bind_token(self, event: AstrMessageEvent, token: str = ""):
         token = (token or "").strip()
         if not token:
             return self._message(
                 "用法：maimaitoken <水鱼 Import-Token>\n"
+                "也可以使用：水鱼绑定 <水鱼 Import-Token> / 绑定水鱼 <水鱼 Import-Token>\n"
                 "群聊中我会尝试撤回包含 Token 的消息。"
             )
 
@@ -203,11 +199,11 @@ class MaimaiUpdaterPlugin(Star):
         await self.store.set_import_token(self._user_key(event), token)
         await self._send_text(
             event,
-            f"✅ 水鱼 Token 绑定成功：{mask_secret(token)}\n"
+            f"✅ 水鱼绑定成功：{mask_secret(token)}\n"
             f"之后发送 {self._prefixless_update_example()} 即可更新 B50。",
         )
 
-    @command("maimaiupdate", alias={"更新水鱼", "更新b50"})
+    @command("maimaiupdate", alias={"更新水鱼", "水鱼更新", "更新b50", "更新B50"})
     async def update_scores(self, event: AstrMessageEvent, sgid_text: str = ""):
         sgid = extract_sgid(sgid_text or "")
         if not sgid:
@@ -220,7 +216,7 @@ class MaimaiUpdaterPlugin(Star):
         event.stop_event()
         await self._update_from_sgid(event, sgid)
 
-    @command("maimaiclear", alias={"清空水鱼"})
+    @command("maimaiclear", alias={"清空水鱼", "清空b50", "清空B50"})
     async def clear_scores(self, event: AstrMessageEvent, confirm: str = ""):
         if not self.enable_clear_command:
             return self._message("当前配置已关闭清空水鱼命令。")
@@ -228,7 +224,7 @@ class MaimaiUpdaterPlugin(Star):
         if confirm not in {"confirm", "确认", "确认清空"}:
             return self._message(
                 "此操作会向水鱼发送清空成绩请求。\n"
-                "确认要清空时请执行：maimaiclear 确认清空"
+                "确认要清空时请执行：maimaiclear 确认清空 / 清空水鱼 确认清空 / 清空b50 确认清空"
             )
 
         user_key = self._user_key(event)
@@ -249,7 +245,6 @@ class MaimaiUpdaterPlugin(Star):
             msg = self.service.describe_error(exc)
             await self.store.set_sync_result(
                 user_key,
-                player_name=record.player_name,
                 rating=record.rating,
                 result=f"清空失败：{msg}",
             )
@@ -271,8 +266,7 @@ class MaimaiUpdaterPlugin(Star):
             lines.append(f"免前缀用法：{self._prefixless_update_example()}")
         lines.append("官方 SGID：不保存，每次更新都需要临时提供")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
-        if record.player_name or record.rating:
-            lines.append(f"玩家名：{record.player_name or '未知'}")
+        if record.rating:
             lines.append(f"Rating：{record.rating}")
         lines.append(f"上次更新：{format_ts(record.last_sync_at)}")
         if record.last_sync_result:

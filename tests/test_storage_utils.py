@@ -42,29 +42,21 @@ class StorageTest(unittest.IsolatedAsyncioTestCase):
     async def test_user_store_roundtrip_and_unbind(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = UserStore(tmp)
-            await store.set_player_profile(
-                "kook:user1",
-                player_name="Player",
-                rating=12345,
-            )
             await store.set_import_token("kook:user1", "b" * 127)
             await store.set_sync_result(
                 "kook:user1",
-                player_name="Player2",
                 rating=13000,
                 result="成功，同步 100 条成绩",
             )
 
             reloaded = UserStore(tmp)
             record = reloaded.get("kook:user1")
-            self.assertEqual(record.player_name, "Player2")
             self.assertEqual(record.rating, 13000)
             self.assertEqual(record.divingfish_import_token, "b" * 127)
             self.assertIn("同步", record.last_sync_result)
 
             await reloaded.clear_local_profile("kook:user1", result="已清空")
             cleared = UserStore(tmp).get("kook:user1")
-            self.assertEqual(cleared.player_name, "")
             self.assertEqual(cleared.rating, 0)
             self.assertEqual(cleared.divingfish_import_token, "b" * 127)
             self.assertEqual(cleared.last_sync_result, "已清空")
@@ -81,10 +73,11 @@ class StorageTest(unittest.IsolatedAsyncioTestCase):
             )
 
             store = UserStore(tmp)
-            self.assertEqual(store.get("onebot:user1").player_name, "P")
+            self.assertEqual(store.get("onebot:user1").rating, 1)
 
             await store.set_import_token("onebot:user1", "c" * 127)
             self.assertNotIn("arcade_credentials", path.read_text(encoding="utf-8"))
+            self.assertNotIn("player_name", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

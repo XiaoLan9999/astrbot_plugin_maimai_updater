@@ -202,9 +202,9 @@ class MaimaiService:
                 player_rating = int(getattr(player, "rating", 0) or 0)
             except Exception as exc:
                 self._log_nonfatal_arcade_player_error(exc, stage="update")
-                player_warning = f"官方玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+                player_warning = "当前数据源不提供官方玩家名预览。"
         else:
-            player_warning = "当前 maimai-py 机台数据源不提供官方玩家名预览。"
+            player_warning = "当前数据源不提供官方玩家名预览。"
 
         await self._prepare_song_cache_without_aliases()
         scores = await self.client.scores(arcade_identifier, provider=arcade_provider)

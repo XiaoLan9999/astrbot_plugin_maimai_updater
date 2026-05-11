@@ -11,7 +11,6 @@ from .utils import now_ts, safe_int
 
 @dataclass(slots=True)
 class UserRecord:
-    player_name: str = ""
     rating: int = 0
     divingfish_import_token: str = ""
     bound_at: int = 0
@@ -23,7 +22,6 @@ class UserRecord:
         if not isinstance(raw, dict):
             return cls()
         return cls(
-            player_name=str(raw.get("player_name") or ""),
             rating=safe_int(raw.get("rating"), 0),
             divingfish_import_token=str(raw.get("divingfish_import_token") or ""),
             bound_at=safe_int(raw.get("bound_at"), 0),
@@ -81,22 +79,6 @@ class UserStore:
     def get(self, user_key: str) -> UserRecord:
         return self._users.get(user_key, UserRecord())
 
-    async def set_player_profile(
-        self,
-        user_key: str,
-        *,
-        player_name: str,
-        rating: int,
-    ) -> UserRecord:
-        async with self._lock:
-            record = self.get(user_key)
-            record.player_name = player_name
-            record.rating = int(rating or 0)
-            record.bound_at = now_ts()
-            self._users[user_key] = record
-            await self.save()
-            return record
-
     async def set_import_token(self, user_key: str, token: str) -> UserRecord:
         async with self._lock:
             record = self.get(user_key)
@@ -109,14 +91,11 @@ class UserStore:
         self,
         user_key: str,
         *,
-        player_name: str,
         rating: int,
         result: str,
     ) -> UserRecord:
         async with self._lock:
             record = self.get(user_key)
-            if player_name:
-                record.player_name = player_name
             record.rating = int(rating or record.rating or 0)
             record.last_sync_at = now_ts()
             record.last_sync_result = result
@@ -127,7 +106,6 @@ class UserStore:
     async def clear_local_profile(self, user_key: str, *, result: str) -> UserRecord:
         async with self._lock:
             record = self.get(user_key)
-            record.player_name = ""
             record.rating = 0
             record.last_sync_at = now_ts()
             record.last_sync_result = result
