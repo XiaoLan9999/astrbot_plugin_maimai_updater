@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -91,11 +92,14 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_bind_from_sgid_keeps_credentials_when_preview_fails(self):
         service = self.make_service(fail_players=True)
-        result = await service.bind_from_sgid("SGWCMAID-test")
+        with patch("astrbot_plugin_maimai_updater.maimai_service.logger.warning") as warning:
+            result = await service.bind_from_sgid("SGWCMAID-test")
 
         self.assertEqual(result.player_name, "")
         self.assertEqual(result.rating, 0)
         self.assertIn("玩家名/Rating", result.player_warning)
+        warning.assert_called_once()
+        self.assertIn("bind", warning.call_args.args[1:])
 
     async def test_bind_from_sgid_allows_arcade_provider_without_player_preview(self):
         service = self.make_service(arcade_provider=FakeArcadeProviderWithoutPlayer)
@@ -124,15 +128,18 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_sync_from_sgid_to_divingfish_uses_score_rating_when_preview_fails(self):
         service = self.make_service(fail_players=True)
-        result = await service.sync_from_sgid_to_divingfish(
-            sgid="SGWCMAID-test",
-            import_token="import-token",
-        )
+        with patch("astrbot_plugin_maimai_updater.maimai_service.logger.warning") as warning:
+            result = await service.sync_from_sgid_to_divingfish(
+                sgid="SGWCMAID-test",
+                import_token="import-token",
+            )
 
         self.assertEqual(result.score_count, 2)
         self.assertEqual(result.rating, 14370)
         self.assertIn("官方玩家名/Rating", result.player_warning)
         self.assertIsNotNone(service.client.updated)
+        warning.assert_called_once()
+        self.assertIn("update", warning.call_args.args[1:])
 
     async def test_sync_from_sgid_to_divingfish_skips_player_for_provider_without_preview(self):
         service = self.make_service(arcade_provider=FakeArcadeProviderWithoutPlayer)

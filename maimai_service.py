@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from astrbot.api import logger
+except ModuleNotFoundError:  # pragma: no cover - local tests without AstrBot installed.
+    import logging
+
+    logger = logging.getLogger(__name__)
+
 
 class MaimaiDependencyError(RuntimeError):
     pass
@@ -87,6 +94,15 @@ class MaimaiService:
     def _identifier(self, *, credentials: str) -> Any:
         return self._load_imports()["PlayerIdentifier"](credentials=credentials)
 
+    def _log_nonfatal_arcade_player_error(self, exc: BaseException, *, stage: str) -> None:
+        logger.warning(
+            "[MaimaiUpdater] arcade player metadata fetch failed during %s: %s: %s",
+            stage,
+            exc.__class__.__name__,
+            self.describe_error(exc),
+            exc_info=True,
+        )
+
     async def _arcade_identifier_from_sgid(self, sgid: str) -> tuple[Any, str]:
         identifier = await self.client.qrcode(sgid, http_proxy=self.http_proxy)
         arcade_credentials = getattr(identifier, "credentials", None)
@@ -109,6 +125,7 @@ class MaimaiService:
                 player_name = str(getattr(player, "name", "") or "")
                 rating = int(getattr(player, "rating", 0) or 0)
             except Exception as exc:
+                self._log_nonfatal_arcade_player_error(exc, stage="bind")
                 player_warning = f"二维码已解析，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
         else:
             player_warning = "二维码已解析；当前 maimai-py 机台数据源不提供玩家名/Rating 预览。"
@@ -134,6 +151,7 @@ class MaimaiService:
                 player_name = str(getattr(player, "name", "") or "")
                 player_rating = int(getattr(player, "rating", 0) or 0)
             except Exception as exc:
+                self._log_nonfatal_arcade_player_error(exc, stage="update")
                 player_warning = f"官方玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
         else:
             player_warning = "当前 maimai-py 机台数据源不提供官方玩家名预览。"
