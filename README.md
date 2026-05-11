@@ -12,9 +12,14 @@
 
 群聊中收到 SGID 或 Token 后会尽量自动撤回并阻止继续分发；私聊不会撤回。
 
-## Windows x64 依赖
+## 运行环境
 
-当前按 Python 3.13 + Windows x64 固定 `maimai-py==1.1.0`，因为该组合可解析到可用的 `maimai-ffi` wheel。
+插件代码本身没有固定操作系统要求，只要 AstrBot 和依赖能正常安装即可。实际部署时需要注意的是：
+
+- Python 需要满足 `maimai-py` 的要求；当前依赖版本要求 Python `>=3.10,<4.0`。
+- 读取官方机台数据依赖 `maimai-ffi`，它是二进制 wheel；你的系统、CPU 架构和 Python 版本必须有对应 wheel。
+- 本仓库的 `requirements.txt` 固定 `maimai-py==1.1.0`，这是为了让 Windows x64 + Python 3.13 环境能稳定安装到可用的 `maimai-ffi` wheel，并不是插件只支持 Windows。
+- 如果你在 Linux/Docker 或其它 Python 版本部署，优先直接安装 `requirements.txt`；如果 `maimai-ffi` 安装失败，请调整 Python 版本，或根据 `maimai-ffi`/`maimai-py` 当前 wheel 支持情况选择匹配版本。
 
 ## 数据
 
