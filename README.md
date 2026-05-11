@@ -54,14 +54,6 @@
 - 本仓库的 `requirements.txt` 固定 `maimai-py==1.4.2`，该版本依赖 `maimai-ffi==0.7.0`。
 - 已确认 Windows x64 + Python 3.10 可下载 `maimai_ffi-0.7.0-cp310-cp310-win_amd64` wheel。
 
-如果网络无法解析华立标题服域名，可以在 Windows hosts 中加入：
-
-```text
-43.137.89.146 wq.sys-all.cn
-43.137.89.146 ai.sys-all.cn
-43.137.89.146 wi.sys-all.cn
-43.137.89.146 at.sys-all.cn
-```
 
 ## 数据
 
