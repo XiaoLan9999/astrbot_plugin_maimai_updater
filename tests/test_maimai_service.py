@@ -64,6 +64,9 @@ class FakeClient:
         self.scores_input = (identifier, provider)
         return FakeScores()
 
+    async def songs(self, **kwargs):
+        self.songs_input = kwargs
+
     async def updates(self, identifier, scores, provider):
         self.updated = (identifier, scores, provider)
 
@@ -98,6 +101,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.player_name, "XiAoLan")
         self.assertEqual(result.rating, 14370)
         self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
+        self.assertEqual(service.client.songs_input, {"alias_provider": None})
         identifier, scores, provider = service.client.updated
         self.assertEqual(identifier.credentials, "import-token")
         self.assertEqual(scores, ["score1", "score2"])

@@ -101,6 +101,17 @@ class MaimaiService:
             exc_info=True,
         )
 
+    async def _prepare_song_cache_without_aliases(self) -> None:
+        songs = getattr(self.client, "songs", None)
+        if not songs:
+            return
+        try:
+            await songs(alias_provider=None)
+        except TypeError:
+            # Older maimai.py versions may not expose alias_provider. Let the
+            # later score fetch use the library's default path in that case.
+            return
+
     async def _arcade_identifier_from_sgid(self, sgid: str) -> tuple[Any, str]:
         identifier = await self.client.qrcode(sgid, http_proxy=self.http_proxy)
         arcade_credentials = getattr(identifier, "credentials", None)
@@ -132,6 +143,7 @@ class MaimaiService:
         else:
             player_warning = "当前 maimai-py 机台数据源不提供官方玩家名预览。"
 
+        await self._prepare_song_cache_without_aliases()
         scores = await self.client.scores(arcade_identifier, provider=arcade_provider)
         score_list = list(getattr(scores, "scores", []) or [])
         score_rating = int(getattr(scores, "rating", 0) or 0)
