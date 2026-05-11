@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import metadata
 from typing import Any
 
 try:
@@ -13,6 +14,29 @@ except ModuleNotFoundError:  # pragma: no cover - local tests without AstrBot in
 
 class MaimaiDependencyError(RuntimeError):
     pass
+
+
+MIN_MAIMAI_PY = (1, 4, 2)
+MIN_MAIMAI_FFI = (0, 7, 0)
+
+
+def _parse_version(version: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for part in version.replace("-", ".").split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if digits:
+            parts.append(int(digits))
+    return tuple(parts)
+
+
+def _is_version_at_least(version: str, minimum: tuple[int, ...]) -> bool:
+    parsed = _parse_version(version)
+    width = max(len(parsed), len(minimum))
+    return parsed + (0,) * (width - len(parsed)) >= minimum + (0,) * (width - len(minimum))
 
 
 @dataclass(slots=True)
@@ -35,9 +59,38 @@ class MaimaiService:
         self._client: Any | None = None
         self._imports: dict[str, Any] | None = None
 
+    def _ensure_dependency_versions(self) -> None:
+        requirements = (
+            ("maimai-py", MIN_MAIMAI_PY),
+            ("maimai-ffi", MIN_MAIMAI_FFI),
+        )
+        installed: list[str] = []
+        too_old: list[str] = []
+        missing: list[str] = []
+        for package_name, minimum in requirements:
+            minimum_text = ".".join(str(part) for part in minimum)
+            try:
+                version = metadata.version(package_name)
+            except metadata.PackageNotFoundError:
+                missing.append(f"{package_name}>={minimum_text}")
+                continue
+            installed.append(f"{package_name}=={version}")
+            if not _is_version_at_least(version, minimum):
+                too_old.append(f"{package_name}=={version}，需要 >= {minimum_text}")
+
+        if missing or too_old:
+            detail = "；".join(missing + too_old)
+            installed_text = "，当前已安装：" + "、".join(installed) if installed else ""
+            raise MaimaiDependencyError(
+                "maimai-py/maimai-ffi 版本不满足当前插件要求。"
+                f"{detail}{installed_text}。"
+                "请完全关闭 AstrBot 后重新安装 requirements.txt，再启动 AstrBot。"
+            )
+
     def _load_imports(self) -> dict[str, Any]:
         if self._imports is not None:
             return self._imports
+        self._ensure_dependency_versions()
         try:
             from maimai_py import (  # type: ignore
                 ArcadeProvider,
@@ -56,6 +109,16 @@ class MaimaiService:
             raise MaimaiDependencyError(
                 "缺少 maimai-py 依赖，请先安装插件 requirements.txt。"
             ) from exc
+
+        try:
+            arcade_provider_probe = ArcadeProvider(http_proxy=self.http_proxy)
+        except TypeError:
+            arcade_provider_probe = ArcadeProvider()
+        if hasattr(arcade_provider_probe, "get_player"):
+            raise MaimaiDependencyError(
+                "当前 AstrBot 进程仍在使用旧版 maimai-py ArcadeProvider。"
+                "请完全关闭 AstrBot 后重新安装 requirements.txt，并重启 AstrBot。"
+            )
 
         self._imports = {
             "ArcadeProvider": ArcadeProvider,

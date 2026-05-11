@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from astrbot_plugin_maimai_updater.maimai_service import (
     MaimaiDependencyError,
     MaimaiService,
+    _is_version_at_least,
 )
 
 
@@ -149,6 +150,15 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("依赖导入失败", message)
         self.assertIn("__init__.py", message)
         self.assertIn("line 94", message)
+
+
+class VersionTest(unittest.TestCase):
+    def test_version_compare(self):
+        self.assertTrue(_is_version_at_least("1.4.2", (1, 4, 2)))
+        self.assertTrue(_is_version_at_least("1.5.0", (1, 4, 2)))
+        self.assertTrue(_is_version_at_least("0.7.0.post1", (0, 7, 0)))
+        self.assertFalse(_is_version_at_least("0.9.5", (1, 4, 2)))
+        self.assertFalse(_is_version_at_least("0.6.9", (0, 7, 0)))
 
 
 if __name__ == "__main__":

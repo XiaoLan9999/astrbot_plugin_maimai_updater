@@ -62,6 +62,14 @@ python -m pip install --no-cache-dir -r requirements.txt
 python -m pip install --no-cache-dir "maimai-py==1.4.2" "httpx>=0.28.0,<0.29.0"
 ```
 
+如果日志里还出现 `maimai_py.providers.arcade.py` 的 `get_player` 或 `models.py` 的 `_raise_for_error`，说明 AstrBot 当前进程仍在使用旧版 maimai-py。请完全关闭 AstrBot 后重新安装依赖并重启。
+
+可以用下面的命令检查 AstrBot 当前 Python 里实际安装的版本：
+
+```powershell
+python -c "import importlib.metadata as m; print('maimai-py', m.version('maimai-py')); print('maimai-ffi', m.version('maimai-ffi'))"
+```
+
 ### Windows 提示 `[WinError 5] 拒绝访问 arcade.cp310-win_amd64.pyd`
 
 这是 Windows 正在锁定 `maimai_ffi` 的二进制扩展文件，通常是因为 AstrBot 当前进程已经加载过 `maimai_ffi`。不要在 AstrBot 运行中覆盖安装这个依赖。
