@@ -10,15 +10,16 @@
 - `/maimai_status` / `水鱼状态`：查看绑定与最近同步状态，Token 只脱敏展示。
 - `/maimai_unbind` / `水鱼解绑`：删除当前用户保存的凭据。
 
-群聊中收到 SGID 或 Token 后会尽量自动撤回并阻止继续分发（有管理员权限）；私聊不会撤回。
+群聊中收到 SGID 或 Token 后会尽量自动撤回并阻止继续分发（需要 Bot 有撤回/管理消息权限）；私聊不会撤回。插件会单独发送“已尝试撤回消息，如果没撤回请手动撤回”的安全提示，不会把撤回提示粘在绑定结果里。
 
 ## 运行环境
 
 插件代码本身没有固定操作系统要求，只要 AstrBot 和依赖能正常安装即可。实际部署时需要注意的是：
 
-- Python 需要满足 `maimai-py` 的要求；当前依赖版本要求 Python `>=3.10,<4.0`。
+- Python 需要满足 `maimai-py` 的要求；当前依赖版本要求 Python `>=3.9,<4.0`。
 - 读取官方机台数据依赖 `maimai-ffi`，它是二进制 wheel；你的系统、CPU 架构和 Python 版本必须有对应 wheel。
-- 本仓库的 `requirements.txt` 固定 `maimai-py==1.1.0`，这是为了让 Windows x64 + Python 3.13 环境能稳定安装到可用的 `maimai-ffi` wheel，并不是插件只支持 Windows。
+- 本仓库的 `requirements.txt` 固定 `maimai-py==0.9.5`，并由它安装 `maimai-ffi>=0.4.1,<0.5.0`。这个组合已确认能为 Windows x64 + Python 3.10 下载到 `maimai_ffi-0.4.3-cp310-win_amd64` wheel。
+- 不建议使用 `maimai-py==1.1.0` 跑在 Python 3.10 上：该版本的 `providers/local/__init__.py` 在 Python 3.10 会触发 `SyntaxError: asynchronous comprehension outside of an asynchronous function`。
 - 如果你在 Linux/Docker 或其它 Python 版本部署，优先直接安装 `requirements.txt`；如果 `maimai-ffi` 安装失败，请调整 Python 版本，或根据 `maimai-ffi`/`maimai-py` 当前 wheel 支持情况选择匹配版本。
 
 ## 数据
@@ -32,6 +33,12 @@
 ```bash
 python -m pip uninstall -y maimai-py maimai-ffi maimai_py
 python -m pip install --no-cache-dir -r requirements.txt
+```
+
+也可以手动安装核心依赖：
+
+```bash
+python -m pip install --no-cache-dir "maimai-py==0.9.5" "httpx>=0.28.0,<0.29.0"
 ```
 
 如果群聊敏感消息撤回失败，请检查 Bot 是否有撤回/管理消息权限。插件会在日志里输出撤回失败 traceback，便于判断是权限、message_id，还是平台适配器不支持。

@@ -41,7 +41,7 @@ class SensitiveInput:
     "astrbot_plugin_maimai_updater",
     "User",
     "绑定舞萌官方二维码凭据和水鱼 Import-Token，并把机台成绩同步到水鱼。",
-    "0.1.1",
+    "0.1.2",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -82,10 +82,14 @@ class MaimaiUpdaterPlugin(Star):
     async def _send_text(self, event: AstrMessageEvent, text: str) -> None:
         await event.send(MessageChain().message(text))
 
-    def _recall_warning(self, recall: RecallResult) -> str:
-        if self.warn_unsupported_recall and recall.warning:
-            return f"\n⚠️ {recall.warning}"
-        return ""
+    async def _send_recall_notice(
+        self,
+        event: AstrMessageEvent,
+        recall: RecallResult,
+    ) -> None:
+        if not self.warn_unsupported_recall or not recall.attempted:
+            return
+        await self._send_text(event, "🔒 已尝试撤回消息，如果没撤回请手动撤回。")
 
     def _cancel_old_pending(self, user_key: str) -> None:
         old = self._pending_binds.pop(user_key, None)
@@ -125,7 +129,6 @@ class MaimaiUpdaterPlugin(Star):
         if not is_probable_sgid(sensitive.value):
             return self._message(
                 "❌ SGID 格式不正确，请重新执行 /maimai_bind 后发送以 SGWCMAID 开头的文本。"
-                + self._recall_warning(sensitive.recall)
             )
 
         await self._send_text(event, "⏳ 正在解析二维码并获取玩家信息，请稍候...")
@@ -135,7 +138,6 @@ class MaimaiUpdaterPlugin(Star):
             logger.exception("[MaimaiUpdater] bind failed")
             return self._message(
                 f"❌ 绑定失败：{self.service.describe_error(exc)}"
-                + self._recall_warning(sensitive.recall)
             )
 
         await self.store.set_arcade_credentials(
@@ -149,7 +151,6 @@ class MaimaiUpdaterPlugin(Star):
             f"玩家名：{result.player_name or '未知'}\n"
             f"Rating：{result.rating}\n"
             "接下来可发送 /maimai_token <水鱼 Import-Token>，再用 /maimai_update 更新水鱼。"
-            + self._recall_warning(sensitive.recall)
         )
 
     @command("maimai_token", alias={"水鱼token"})
@@ -164,12 +165,12 @@ class MaimaiUpdaterPlugin(Star):
         recall = await self.recaller.recall_sensitive(event)
         if recall.attempted:
             event.stop_event()
+            await self._send_recall_notice(event, recall)
 
         if not is_probable_import_token(token):
             await self._send_text(
                 event,
-                "❌ 水鱼 Import-Token 格式看起来不正确，请确认长度约 127-132 字符且只包含字母、数字、_、-。"
-                + self._recall_warning(recall),
+                "❌ 水鱼 Import-Token 格式看起来不正确，请确认长度约 127-132 字符且只包含字母、数字、_、-。",
             )
             return
 
@@ -177,7 +178,6 @@ class MaimaiUpdaterPlugin(Star):
         await self._send_text(
             event,
             f"✅ 水鱼 Token 绑定成功：{mask_secret(token)}"
-            + self._recall_warning(recall),
         )
 
     @command("maimai_update", alias={"更新水鱼", "更新b50"})
@@ -262,6 +262,7 @@ class MaimaiUpdaterPlugin(Star):
             return
 
         recall = await self.recaller.recall_sensitive(event)
+        await self._send_recall_notice(event, recall)
         if not pending.future.done():
             pending.future.set_result(SensitiveInput(value=sgid, recall=recall))
         event.stop_event()
