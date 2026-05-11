@@ -35,9 +35,8 @@ class StorageTest(unittest.IsolatedAsyncioTestCase):
     async def test_user_store_roundtrip_and_unbind(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = UserStore(tmp)
-            await store.set_arcade_credentials(
+            await store.set_player_profile(
                 "kook:user1",
-                arcade_credentials="arcade-secret",
                 player_name="Player",
                 rating=12345,
             )
@@ -53,12 +52,25 @@ class StorageTest(unittest.IsolatedAsyncioTestCase):
             record = reloaded.get("kook:user1")
             self.assertEqual(record.player_name, "Player2")
             self.assertEqual(record.rating, 13000)
-            self.assertEqual(record.arcade_credentials, "arcade-secret")
             self.assertEqual(record.divingfish_import_token, "b" * 127)
             self.assertIn("同步", record.last_sync_result)
 
             self.assertTrue(await reloaded.remove("kook:user1"))
             self.assertEqual(reloaded.get("kook:user1"), UserRecord())
+
+    async def test_legacy_arcade_credentials_are_dropped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "users.json"
+            path.write_text(
+                '{"onebot:user1":{"player_name":"P","rating":1,"arcade_credentials":"secret"}}',
+                encoding="utf-8",
+            )
+
+            store = UserStore(tmp)
+            self.assertEqual(store.get("onebot:user1").player_name, "P")
+
+            await store.set_import_token("onebot:user1", "c" * 127)
+            self.assertNotIn("arcade_credentials", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

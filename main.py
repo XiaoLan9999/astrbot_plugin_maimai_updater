@@ -28,7 +28,6 @@ class PendingBindReplaced(RuntimeError):
 @dataclass(slots=True)
 class PendingBind:
     future: asyncio.Future
-    prompt_event: AstrMessageEvent
 
 
 @dataclass(slots=True)
@@ -40,8 +39,8 @@ class SensitiveInput:
 @register(
     "astrbot_plugin_maimai_updater",
     "User",
-    "绑定舞萌官方二维码凭据和水鱼 Import-Token，并把机台成绩同步到水鱼。",
-    "0.1.4",
+    "使用一次性舞萌官方二维码凭据，把机台成绩同步到水鱼。",
+    "0.2.0",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -96,42 +95,58 @@ class MaimaiUpdaterPlugin(Star):
         if old and not old.future.done():
             old.future.set_exception(PendingBindReplaced())
 
-    @command("maimai_bind", alias={"舞萌绑定", "水鱼绑定"})
-    async def bind_arcade(self, event: AstrMessageEvent):
-        user_key = self._user_key(event)
+    async def _request_sgid(
+        self,
+        event: AstrMessageEvent,
+        user_key: str,
+        *,
+        prompt: str,
+        timeout_message: str,
+    ) -> SensitiveInput | MessageEventResult:
         self._cancel_old_pending(user_key)
 
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        self._pending_binds[user_key] = PendingBind(future=future, prompt_event=event)
-
-        await self._send_text(
-            event,
-            f"请在 {self.bind_timeout} 秒内发送官方二维码识别出的 SGWCMAID/SGID 文本。\n"
-            "群聊中我会尝试自动撤回包含 SGID 的消息；私聊不会撤回。",
-        )
+        self._pending_binds[user_key] = PendingBind(future=future)
+        await self._send_text(event, prompt)
 
         try:
             sensitive: SensitiveInput = await asyncio.wait_for(
                 future,
                 timeout=max(self.bind_timeout, 1),
             )
+            return sensitive
         except asyncio.TimeoutError:
             self._pending_binds.pop(user_key, None)
-            return self._message("⏰ 绑定超时，请重新执行 /maimai_bind。")
+            return self._message(timeout_message)
         except PendingBindReplaced:
-            return self._message("已开始新的绑定流程，旧流程已取消。")
+            return self._message("已开始新的 SGID 流程，旧流程已取消。")
         finally:
             current = self._pending_binds.get(user_key)
             if current and current.future is future and future.done():
                 self._pending_binds.pop(user_key, None)
+
+    @command("maimai_bind", alias={"舞萌绑定", "水鱼绑定"})
+    async def bind_arcade(self, event: AstrMessageEvent):
+        user_key = self._user_key(event)
+        sensitive = await self._request_sgid(
+            event,
+            user_key,
+            prompt=(
+                f"请在 {self.bind_timeout} 秒内发送官方二维码识别出的 SGWCMAID/SGID 文本。\n"
+                "这条 SGID 只用于本次账号验证，不会保存；群聊中我会尝试自动撤回。"
+            ),
+            timeout_message="⏰ 绑定超时，请重新执行 /maimai_bind。",
+        )
+        if not isinstance(sensitive, SensitiveInput):
+            return sensitive
 
         if not is_probable_sgid(sensitive.value):
             return self._message(
                 "❌ SGID 格式不正确，请重新执行 /maimai_bind 后发送以 SGWCMAID 开头的文本。"
             )
 
-        await self._send_text(event, "⏳ 正在解析二维码并获取玩家信息，请稍候...")
+        await self._send_text(event, "⏳ 正在解析本次二维码并获取玩家信息，请稍候...")
         try:
             result = await self.service.bind_from_sgid(sensitive.value)
         except Exception as exc:
@@ -140,16 +155,16 @@ class MaimaiUpdaterPlugin(Star):
                 f"❌ 绑定失败：{self.service.describe_error(exc)}"
             )
 
-        await self.store.set_arcade_credentials(
+        await self.store.set_player_profile(
             user_key,
-            arcade_credentials=result.arcade_credentials,
             player_name=result.player_name,
             rating=result.rating,
         )
         lines = [
-            "✅ 官方账号绑定成功！\n"
+            "✅ 官方账号验证成功！\n"
             f"玩家名：{result.player_name or '未知'}\n"
             f"Rating：{result.rating}\n"
+            "我不会保存本次 SGID 或官方临时凭据。之后更新水鱼仍需重新提供一次 SGID。\n"
             "接下来可发送 /maimai_token <水鱼 Import-Token>，再用 /maimai_update 更新水鱼。"
         ]
         if result.player_warning:
@@ -187,22 +202,33 @@ class MaimaiUpdaterPlugin(Star):
     async def update_scores(self, event: AstrMessageEvent):
         user_key = self._user_key(event)
         record = self.store.get(user_key)
-        missing = []
-        if not record.arcade_credentials:
-            missing.append("官方账号")
         if not record.divingfish_import_token:
-            missing.append("水鱼 Import-Token")
-        if missing:
             return self._message(
-                "❌ 尚未完成绑定："
-                + "、".join(missing)
-                + "。\n请先执行 /maimai_bind 和 /maimai_token。"
+                "❌ 尚未绑定水鱼 Import-Token。\n"
+                "请先执行 /maimai_token <水鱼 Import-Token>。"
             )
 
-        await self._send_text(event, "⏳ 正在从机台数据源拉取成绩并同步到水鱼，请稍候...")
+        sensitive = await self._request_sgid(
+            event,
+            user_key,
+            prompt=(
+                f"请在 {self.bind_timeout} 秒内发送本次更新用的 SGWCMAID/SGID 文本。\n"
+                "这条 SGID 只用于本次更新，使用后不会保存；群聊中我会尝试自动撤回。"
+            ),
+            timeout_message="⏰ 更新超时，请重新执行 /maimai_update。",
+        )
+        if not isinstance(sensitive, SensitiveInput):
+            return sensitive
+
+        if not is_probable_sgid(sensitive.value):
+            return self._message(
+                "❌ SGID 格式不正确，请重新执行 /maimai_update 后发送以 SGWCMAID 开头的文本。"
+            )
+
+        await self._send_text(event, "⏳ 正在用本次 SGID 拉取机台成绩并同步到水鱼，请稍候...")
         try:
-            result = await self.service.sync_to_divingfish(
-                arcade_credentials=record.arcade_credentials,
+            result = await self.service.sync_from_sgid_to_divingfish(
+                sgid=sensitive.value,
                 import_token=record.divingfish_import_token,
             )
         except Exception as exc:
@@ -238,12 +264,12 @@ class MaimaiUpdaterPlugin(Star):
     async def status(self, event: AstrMessageEvent):
         record = self.store.get(self._user_key(event))
         lines = ["📋 maimai 水鱼更新状态"]
-        lines.append(f"官方账号：{'已绑定' if record.arcade_credentials else '未绑定'}")
+        lines.append("官方 SGID：不保存，每次绑定/更新都需要临时提供")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
         if record.player_name or record.rating:
             lines.append(f"玩家名：{record.player_name or '未知'}")
             lines.append(f"Rating：{record.rating}")
-        lines.append(f"绑定时间：{format_ts(record.bound_at)}")
+        lines.append(f"最近验证：{format_ts(record.bound_at)}")
         lines.append(f"上次更新：{format_ts(record.last_sync_at)}")
         if record.last_sync_result:
             lines.append(f"上次结果：{record.last_sync_result}")
@@ -253,7 +279,7 @@ class MaimaiUpdaterPlugin(Star):
     async def unbind(self, event: AstrMessageEvent):
         removed = await self.store.remove(self._user_key(event))
         if removed:
-            return self._message("✅ 已删除你的官方账号凭据和水鱼 Token。")
+            return self._message("✅ 已删除你的水鱼 Token 和本地展示状态。")
         return self._message("当前没有保存的绑定信息。")
 
     @event_message_type(EventMessageType.ALL)

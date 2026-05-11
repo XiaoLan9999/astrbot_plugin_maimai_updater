@@ -10,7 +10,6 @@ class MaimaiDependencyError(RuntimeError):
 
 @dataclass(slots=True)
 class BindResult:
-    arcade_credentials: str
     player_name: str
     rating: int
     player_warning: str = ""
@@ -41,15 +40,7 @@ class MaimaiService:
                 MaimaiClient,
                 PlayerIdentifier,
             )
-            from maimai_py.exceptions import (  # type: ignore
-                AimeServerError,
-                ArcadeError,
-                InvalidDeveloperTokenError,
-                InvalidPlayerIdentifierError,
-                MaimaiPyError,
-                PrivacyLimitationError,
-                TitleServerError,
-            )
+            from maimai_py import exceptions as maimai_exceptions  # type: ignore
             import httpx
         except SyntaxError as exc:
             raise MaimaiDependencyError(
@@ -66,13 +57,16 @@ class MaimaiService:
             "DivingFishProvider": DivingFishProvider,
             "MaimaiClient": MaimaiClient,
             "PlayerIdentifier": PlayerIdentifier,
-            "AimeServerError": AimeServerError,
-            "ArcadeError": ArcadeError,
-            "InvalidDeveloperTokenError": InvalidDeveloperTokenError,
-            "InvalidPlayerIdentifierError": InvalidPlayerIdentifierError,
-            "MaimaiPyError": MaimaiPyError,
-            "PrivacyLimitationError": PrivacyLimitationError,
-            "TitleServerError": TitleServerError,
+            "AimeServerError": getattr(maimai_exceptions, "AimeServerError", None),
+            "ArcadeError": getattr(maimai_exceptions, "ArcadeError", None),
+            "ArcadeIdentifierError": getattr(maimai_exceptions, "ArcadeIdentifierError", None),
+            "InvalidDeveloperTokenError": getattr(maimai_exceptions, "InvalidDeveloperTokenError", None),
+            "InvalidPlayerIdentifierError": getattr(maimai_exceptions, "InvalidPlayerIdentifierError", None),
+            "MaimaiPyError": getattr(maimai_exceptions, "MaimaiPyError", None),
+            "PrivacyLimitationError": getattr(maimai_exceptions, "PrivacyLimitationError", None),
+            "TitleServerBlockedError": getattr(maimai_exceptions, "TitleServerBlockedError", None),
+            "TitleServerError": getattr(maimai_exceptions, "TitleServerError", None),
+            "TitleServerNetworkError": getattr(maimai_exceptions, "TitleServerNetworkError", None),
             "HTTPError": httpx.HTTPError,
         }
         return self._imports
@@ -93,39 +87,43 @@ class MaimaiService:
     def _identifier(self, *, credentials: str) -> Any:
         return self._load_imports()["PlayerIdentifier"](credentials=credentials)
 
-    async def bind_from_sgid(self, sgid: str) -> BindResult:
+    async def _arcade_identifier_from_sgid(self, sgid: str) -> tuple[Any, str]:
         identifier = await self.client.qrcode(sgid, http_proxy=self.http_proxy)
         arcade_credentials = getattr(identifier, "credentials", None)
         if not isinstance(arcade_credentials, str) or not arcade_credentials:
             raise RuntimeError("二维码返回的凭据格式异常。")
+        return self._identifier(credentials=arcade_credentials), arcade_credentials
 
+    async def bind_from_sgid(self, sgid: str) -> BindResult:
+        arcade_identifier, _ = await self._arcade_identifier_from_sgid(sgid)
         player_name = ""
         rating = 0
         player_warning = ""
-        try:
-            player = await self.client.players(
-                self._identifier(credentials=arcade_credentials),
-                provider=self._arcade_provider(),
-            )
-            player_name = str(getattr(player, "name", "") or "")
-            rating = int(getattr(player, "rating", 0) or 0)
-        except Exception as exc:
-            player_warning = f"二维码已解析，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+        arcade_provider = self._arcade_provider()
+        if hasattr(arcade_provider, "get_player"):
+            try:
+                player = await self.client.players(
+                    arcade_identifier,
+                    provider=arcade_provider,
+                )
+                player_name = str(getattr(player, "name", "") or "")
+                rating = int(getattr(player, "rating", 0) or 0)
+            except Exception as exc:
+                player_warning = f"二维码已解析，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+        else:
+            player_warning = "二维码已解析；当前 maimai-py 机台数据源不提供玩家名/Rating 预览。"
 
         return BindResult(
-            arcade_credentials=arcade_credentials,
             player_name=player_name,
             rating=rating,
             player_warning=player_warning,
         )
 
-    async def sync_to_divingfish(
+    async def _sync_arcade_identifier_to_divingfish(
         self,
-        *,
-        arcade_credentials: str,
+        arcade_identifier: Any,
         import_token: str,
     ) -> SyncResult:
-        arcade_identifier = self._identifier(credentials=arcade_credentials)
         arcade_provider = self._arcade_provider()
         scores = await self.client.scores(arcade_identifier, provider=arcade_provider)
         score_list = list(getattr(scores, "scores", []) or [])
@@ -139,17 +137,32 @@ class MaimaiService:
         rating = 0
         player_warning = ""
         try:
-            player = await self.client.players(arcade_identifier, provider=arcade_provider)
+            player = await self.client.players(
+                self._identifier(credentials=import_token),
+                provider=self._divingfish_provider(),
+            )
             player_name = str(getattr(player, "name", "") or "")
             rating = int(getattr(player, "rating", 0) or 0)
         except Exception as exc:
-            player_warning = f"成绩已同步，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+            player_warning = f"成绩已同步，但水鱼玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
 
         return SyncResult(
             player_name=player_name,
             rating=rating,
             score_count=len(score_list),
             player_warning=player_warning,
+        )
+
+    async def sync_from_sgid_to_divingfish(
+        self,
+        *,
+        sgid: str,
+        import_token: str,
+    ) -> SyncResult:
+        arcade_identifier, _ = await self._arcade_identifier_from_sgid(sgid)
+        return await self._sync_arcade_identifier_to_divingfish(
+            arcade_identifier,
+            import_token,
         )
 
     async def close(self) -> None:
@@ -172,7 +185,10 @@ class MaimaiService:
         imports = self._imports or {}
         checks = (
             ("AimeServerError", "二维码无效或已过期，请重新从官方公众号获取二维码后再试。"),
+            ("TitleServerBlockedError", "舞萌标题服务器拒绝了当前请求，可能是当前 IP 暂时被限制，请稍后再试或更换网络。"),
+            ("TitleServerNetworkError", "舞萌标题服务器网络请求失败，请稍后再试。"),
             ("TitleServerError", "舞萌标题服务器请求失败，可能是网络波动或当前 IP 暂时被限制，请稍后再试。"),
+            ("ArcadeIdentifierError", "官方二维码凭据无效或已过期，请重新从官方公众号获取二维码后再试。"),
             ("ArcadeError", "机台数据源返回异常，可能是二维码过期、官方服务波动或账号状态异常。"),
             ("InvalidPlayerIdentifierError", "水鱼 Import-Token 无效，或水鱼账号不允许导入，请重新绑定 Token。"),
             ("InvalidDeveloperTokenError", "水鱼接口拒绝了请求，请检查 Token 或稍后再试。"),

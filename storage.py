@@ -13,7 +13,6 @@ from .utils import now_ts, safe_int
 class UserRecord:
     player_name: str = ""
     rating: int = 0
-    arcade_credentials: str = ""
     divingfish_import_token: str = ""
     bound_at: int = 0
     last_sync_at: int = 0
@@ -26,7 +25,6 @@ class UserRecord:
         return cls(
             player_name=str(raw.get("player_name") or ""),
             rating=safe_int(raw.get("rating"), 0),
-            arcade_credentials=str(raw.get("arcade_credentials") or ""),
             divingfish_import_token=str(raw.get("divingfish_import_token") or ""),
             bound_at=safe_int(raw.get("bound_at"), 0),
             last_sync_at=safe_int(raw.get("last_sync_at"), 0),
@@ -83,17 +81,15 @@ class UserStore:
     def get(self, user_key: str) -> UserRecord:
         return self._users.get(user_key, UserRecord())
 
-    async def set_arcade_credentials(
+    async def set_player_profile(
         self,
         user_key: str,
         *,
-        arcade_credentials: str,
         player_name: str,
         rating: int,
     ) -> UserRecord:
         async with self._lock:
             record = self.get(user_key)
-            record.arcade_credentials = arcade_credentials
             record.player_name = player_name
             record.rating = int(rating or 0)
             record.bound_at = now_ts()
@@ -134,4 +130,3 @@ class UserStore:
             self._users.pop(user_key, None)
             await self.save()
             return existed
-

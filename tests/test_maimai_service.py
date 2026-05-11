@@ -21,6 +21,14 @@ class FakeArcadeProvider:
     def __init__(self, http_proxy=None):
         self.http_proxy = http_proxy
 
+    async def get_player(self, identifier, client):
+        return FakePlayer()
+
+
+class FakeArcadeProviderWithoutPlayer:
+    def __init__(self, http_proxy=None):
+        self.http_proxy = http_proxy
+
 
 class FakeDivingFishProvider:
     pass
@@ -59,10 +67,10 @@ class FakeClient:
 
 
 class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
-    def make_service(self, *, fail_players: bool = False):
+    def make_service(self, *, fail_players: bool = False, arcade_provider=FakeArcadeProvider):
         service = MaimaiService(timeout=1, http_proxy="http://127.0.0.1:7890")
         service._imports = {
-            "ArcadeProvider": FakeArcadeProvider,
+            "ArcadeProvider": arcade_provider,
             "DivingFishProvider": FakeDivingFishProvider,
             "PlayerIdentifier": FakeIdentifier,
         }
@@ -73,7 +81,6 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         service = self.make_service()
         result = await service.bind_from_sgid("SGWCMAID-test")
 
-        self.assertEqual(result.arcade_credentials, "arcade-credentials")
         self.assertEqual(result.player_name, "XiAoLan")
         self.assertEqual(result.rating, 14370)
         self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
@@ -85,33 +92,39 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         service = self.make_service(fail_players=True)
         result = await service.bind_from_sgid("SGWCMAID-test")
 
-        self.assertEqual(result.arcade_credentials, "arcade-credentials")
         self.assertEqual(result.player_name, "")
         self.assertEqual(result.rating, 0)
         self.assertIn("玩家名/Rating", result.player_warning)
 
-    async def test_sync_to_divingfish_updates_scores_with_import_token(self):
+    async def test_bind_from_sgid_allows_arcade_provider_without_player_preview(self):
+        service = self.make_service(arcade_provider=FakeArcadeProviderWithoutPlayer)
+        result = await service.bind_from_sgid("SGWCMAID-test")
+
+        self.assertIn("不提供玩家名/Rating", result.player_warning)
+
+    async def test_sync_from_sgid_to_divingfish_uses_fresh_qrcode(self):
         service = self.make_service()
-        result = await service.sync_to_divingfish(
-            arcade_credentials="arcade-credentials",
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
             import_token="import-token",
         )
 
         self.assertEqual(result.score_count, 2)
+        self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
         identifier, scores, provider = service.client.updated
         self.assertEqual(identifier.credentials, "import-token")
         self.assertEqual(scores, ["score1", "score2"])
         self.assertIsInstance(provider, FakeDivingFishProvider)
 
-    async def test_sync_to_divingfish_succeeds_when_preview_fails(self):
+    async def test_sync_from_sgid_to_divingfish_succeeds_when_preview_fails(self):
         service = self.make_service(fail_players=True)
-        result = await service.sync_to_divingfish(
-            arcade_credentials="arcade-credentials",
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
             import_token="import-token",
         )
 
         self.assertEqual(result.score_count, 2)
-        self.assertIn("成绩已同步", result.player_warning)
+        self.assertIn("水鱼玩家名/Rating", result.player_warning)
         self.assertIsNotNone(service.client.updated)
 
     async def test_describe_dependency_syntax_error(self):
