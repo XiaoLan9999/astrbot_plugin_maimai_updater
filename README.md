@@ -41,4 +41,21 @@ python -m pip install --no-cache-dir -r requirements.txt
 python -m pip install --no-cache-dir "maimai-py==0.9.5" "httpx>=0.28.0,<0.29.0"
 ```
 
+### Windows 提示 `[WinError 5] 拒绝访问 arcade.cp310-win_amd64.pyd`
+
+这是 Windows 正在锁定 `maimai_ffi` 的二进制扩展文件，通常是因为 AstrBot 当前进程已经加载过 `maimai_ffi`。不要在 AstrBot 运行中覆盖安装这个依赖。
+
+处理方式：
+
+1. 完全关闭 AstrBot Launcher 和所有 AstrBot/Python 进程。
+2. 打开一个新的 PowerShell。
+3. 使用 AstrBot 同一个 Python 执行：
+
+```powershell
+python -m pip uninstall -y maimai-py maimai-ffi maimai_py
+python -m pip install --no-cache-dir "maimai-py==0.9.5" "httpx>=0.28.0,<0.29.0"
+```
+
+4. 重新启动 AstrBot，再安装或重载插件。
+
 如果群聊敏感消息撤回失败，请检查 Bot 是否有撤回/管理消息权限。插件会在日志里输出撤回失败 traceback，便于判断是权限、message_id，还是平台适配器不支持。

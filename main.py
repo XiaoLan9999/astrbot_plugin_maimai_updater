@@ -41,7 +41,7 @@ class SensitiveInput:
     "astrbot_plugin_maimai_updater",
     "User",
     "绑定舞萌官方二维码凭据和水鱼 Import-Token，并把机台成绩同步到水鱼。",
-    "0.1.2",
+    "0.1.3",
     "",
 )
 class MaimaiUpdaterPlugin(Star):

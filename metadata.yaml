@@ -1,7 +1,7 @@
 name: astrbot_plugin_maimai_updater
 display_name: 舞萌 DX 水鱼更新器
 desc: 绑定舞萌官方二维码凭据和水鱼 Import-Token，从机台数据源同步成绩到水鱼查分器。
-version: v0.1.2
+version: v0.1.3
 author: User
-repo: ""
+repo: "https://github.com/XiaoLan9999/astrbot_plugin_maimai_updater"
 astrbot_version: ">=4.5.2"
