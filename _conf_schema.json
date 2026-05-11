@@ -1,15 +1,9 @@
 {
-  "enable_text_update_trigger": {
-    "description": "启用文本触发更新",
-    "hint": "开启后，用户可发送“水鱼更新 SGWCMAID...”来更新水鱼。关闭后只保留 maimaiupdate <SGID> 等 AstrBot 命令触发，避免和其它插件或群聊文本误触发。",
+  "enable_prefixless_update_command": {
+    "description": "启用免前缀更新命令",
+    "hint": "开启后，用户可以在群聊/私聊直接发送“更新水鱼 SGWCMAID...”或“更新b50 SGWCMAID...”。关闭后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /更新水鱼 SGWCMAID...。",
     "type": "bool",
     "default": true
-  },
-  "text_update_command": {
-    "description": "文本更新触发词",
-    "hint": "默认是“水鱼更新”。实际用法为：水鱼更新 SGWCMAID...。只有启用文本触发更新时生效。",
-    "type": "string",
-    "default": "水鱼更新"
   },
   "enable_clear_command": {
     "description": "启用清空水鱼命令",

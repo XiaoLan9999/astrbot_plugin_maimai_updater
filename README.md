@@ -7,8 +7,8 @@
 ## 功能
 
 - `maimaitoken <Import-Token>` / `水鱼token`：保存用户自己的水鱼 Import-Token。
-- `水鱼更新 SGWCMAID...`：用这次官方二维码拉取成绩并更新水鱼。
-- `maimaiupdate <SGID>` / `更新水鱼` / `更新b50`：等价的 AstrBot 命令触发方式。
+- `更新水鱼 SGWCMAID...` / `更新b50 SGWCMAID...`：免 Bot 唤醒前缀的更新方式，可在面板中关闭。
+- `maimaiupdate <SGID>` / `更新水鱼` / `更新b50`：标准 AstrBot 命令触发方式，按你的 AstrBot 配置可能需要 `/` 等 Bot 唤醒前缀。
 - `maimaiclear 确认清空` / `清空水鱼 确认清空`：向水鱼发送清空成绩请求，用于误用他人 SGID 后手动处理。
 - `maimaistatus` / `水鱼状态`：查看 token 绑定状态、最近同步结果和当前 SGID 触发方式。
 - `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
@@ -17,18 +17,21 @@
 
 ## SGID 更新触发
 
-插件不会响应裸 `SGWCMAID...`，避免误触发或和其它插件冲突。默认用法是：
+插件不会响应裸 `SGWCMAID...`，避免误触发或和其它插件冲突。
+
+默认开启 `enable_prefixless_update_command`，所以可以把原本需要 Bot 唤醒前缀的更新命令：
 
 ```text
-水鱼更新 SGWCMAID...
+/更新水鱼 SGWCMAID...
 ```
 
-插件配置里可以调整：
+简化为：
 
-- `enable_text_update_trigger`：开启/关闭“水鱼更新 SGID”这种普通文本触发。
-- `text_update_command`：修改文本触发词，默认是 `水鱼更新`。
+```text
+更新水鱼 SGWCMAID...
+```
 
-如果关闭文本触发，仍可使用 AstrBot 命令 `maimaiupdate <SGID>`。
+如果关闭 `enable_prefixless_update_command`，插件只响应标准 AstrBot 命令触发，例如 `/更新水鱼 SGWCMAID...` 或 `maimaiupdate <SGID>`。
 
 ## 安全说明
 

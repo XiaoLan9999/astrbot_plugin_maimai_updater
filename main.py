@@ -26,7 +26,7 @@ from .utils import (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把机台成绩同步到水鱼。",
-    "0.3.1",
+    "0.3.2",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -38,8 +38,9 @@ class MaimaiUpdaterPlugin(Star):
         data_dir = StarTools.get_data_dir(plugin_name="astrbot_plugin_maimai_updater")
         self.store = UserStore(data_dir)
 
-        self.enable_text_update_trigger = bool(self.config.get("enable_text_update_trigger", True))
-        self.text_update_command = str(self.config.get("text_update_command", "水鱼更新") or "水鱼更新").strip()
+        self.enable_prefixless_update_command = bool(
+            self.config.get("enable_prefixless_update_command", True)
+        )
         self.enable_clear_command = bool(self.config.get("enable_clear_command", True))
         self.warn_unsupported_recall = bool(self.config.get("warn_unsupported_recall", True))
         self.service = MaimaiService(
@@ -79,22 +80,25 @@ class MaimaiUpdaterPlugin(Star):
             return
         await self._send_text(event, "🔒 已尝试撤回消息，如果没撤回请手动撤回。")
 
-    def _text_update_example(self) -> str:
-        command_text = self.text_update_command or "水鱼更新"
-        return f"{command_text} SGWCMAID..."
+    @staticmethod
+    def _prefixless_update_example() -> str:
+        return "更新水鱼 SGWCMAID..."
 
-    def _extract_text_update_sgid(self, text: str) -> str | None:
-        if not self.enable_text_update_trigger:
+    def _extract_prefixless_update_sgid(self, text: str) -> str | None:
+        if not self.enable_prefixless_update_command:
             return None
         content = (text or "").strip()
         if not content:
             return None
-        command_text = self.text_update_command or "水鱼更新"
-        if not content.startswith(command_text):
-            return None
-        rest = content[len(command_text):].strip()
-        rest = rest.lstrip(":：").strip()
-        return extract_sgid(rest)
+        for command_text in ("maimaiupdate", "更新水鱼", "更新B50", "更新b50"):
+            if not content.startswith(command_text):
+                continue
+            suffix = content[len(command_text):]
+            if suffix and suffix[0] not in " \t\r\n:：":
+                continue
+            rest = suffix.strip().lstrip(":：").strip()
+            return extract_sgid(rest)
+        return None
 
     def _validate_sgid_for_one_time_use(self, sgid: str) -> str:
         freshness = validate_sgid_freshness(
@@ -200,7 +204,7 @@ class MaimaiUpdaterPlugin(Star):
         await self._send_text(
             event,
             f"✅ 水鱼 Token 绑定成功：{mask_secret(token)}\n"
-            f"之后发送 {self._text_update_example()} 即可更新 B50。",
+            f"之后发送 {self._prefixless_update_example()} 即可更新 B50。",
         )
 
     @command("maimaiupdate", alias={"更新水鱼", "更新b50"})
@@ -209,7 +213,7 @@ class MaimaiUpdaterPlugin(Star):
         if not sgid:
             return self._message(
                 "用法：maimaiupdate <SGID>\n"
-                f"也可以发送：{self._text_update_example()}"
+                f"也可以发送：{self._prefixless_update_example()}"
             )
 
         await self._recall_current_message(event)
@@ -261,10 +265,10 @@ class MaimaiUpdaterPlugin(Star):
     async def status(self, event: AstrMessageEvent):
         record = self.store.get(self._user_key(event))
         lines = ["📋 maimai 水鱼更新状态"]
-        text_trigger = "开启" if self.enable_text_update_trigger else "关闭"
-        lines.append(f"文本更新触发：{text_trigger}")
-        if self.enable_text_update_trigger:
-            lines.append(f"文本触发用法：{self._text_update_example()}")
+        prefixless_update = "开启" if self.enable_prefixless_update_command else "关闭"
+        lines.append(f"免前缀更新命令：{prefixless_update}")
+        if self.enable_prefixless_update_command:
+            lines.append(f"免前缀用法：{self._prefixless_update_example()}")
         lines.append("官方 SGID：不保存，每次更新都需要临时提供")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
         if record.player_name or record.rating:
@@ -283,8 +287,8 @@ class MaimaiUpdaterPlugin(Star):
         return self._message("当前没有保存的绑定信息。")
 
     @event_message_type(EventMessageType.ALL)
-    async def handle_text_sgid_update(self, event: AstrMessageEvent):
-        sgid = self._extract_text_update_sgid(event.message_str or "")
+    async def handle_prefixless_update_command(self, event: AstrMessageEvent):
+        sgid = self._extract_prefixless_update_sgid(event.message_str or "")
         if not sgid:
             return
 
