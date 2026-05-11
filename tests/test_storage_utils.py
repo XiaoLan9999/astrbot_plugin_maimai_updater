@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+import tempfile
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from astrbot_plugin_maimai_updater.storage import UserRecord, UserStore
+from astrbot_plugin_maimai_updater.utils import (
+    extract_sgid,
+    is_probable_import_token,
+    is_probable_sgid,
+    mask_secret,
+)
+
+
+class UtilsTest(unittest.TestCase):
+    def test_extract_and_validate_sgid(self):
+        sgid = "SGWCMAID0123456789abcdef"
+        self.assertEqual(extract_sgid(f"请绑定 {sgid}"), sgid)
+        self.assertTrue(is_probable_sgid(sgid))
+        self.assertFalse(is_probable_sgid("not-a-sgid"))
+
+    def test_token_validation_and_masking(self):
+        token = "a" * 127
+        self.assertTrue(is_probable_import_token(token))
+        self.assertFalse(is_probable_import_token("short-token"))
+        self.assertEqual(mask_secret("abcdef123456", 3, 3), "abc***456")
+        self.assertEqual(mask_secret(""), "未绑定")
+
+
+class StorageTest(unittest.IsolatedAsyncioTestCase):
+    async def test_user_store_roundtrip_and_unbind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = UserStore(tmp)
+            await store.set_arcade_credentials(
+                "kook:user1",
+                arcade_credentials="arcade-secret",
+                player_name="Player",
+                rating=12345,
+            )
+            await store.set_import_token("kook:user1", "b" * 127)
+            await store.set_sync_result(
+                "kook:user1",
+                player_name="Player2",
+                rating=13000,
+                result="成功，同步 100 条成绩",
+            )
+
+            reloaded = UserStore(tmp)
+            record = reloaded.get("kook:user1")
+            self.assertEqual(record.player_name, "Player2")
+            self.assertEqual(record.rating, 13000)
+            self.assertEqual(record.arcade_credentials, "arcade-secret")
+            self.assertEqual(record.divingfish_import_token, "b" * 127)
+            self.assertIn("同步", record.last_sync_result)
+
+            self.assertTrue(await reloaded.remove("kook:user1"))
+            self.assertEqual(reloaded.get("kook:user1"), UserRecord())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,43 @@
+{
+  "bind_timeout_seconds": {
+    "description": "绑定超时时间",
+    "hint": "执行 /maimai_bind 后等待用户发送 SGWCMAID/SGID 的秒数。",
+    "type": "int",
+    "slider": {
+      "min": 30,
+      "max": 300,
+      "step": 10
+    },
+    "default": 180
+  },
+  "request_timeout_seconds": {
+    "description": "网络请求超时时间",
+    "hint": "请求舞萌机台服务和水鱼接口的超时时间。",
+    "type": "int",
+    "slider": {
+      "min": 5,
+      "max": 60,
+      "step": 5
+    },
+    "default": 30
+  },
+  "maimai_http_proxy": {
+    "description": "舞萌请求代理",
+    "hint": "可选 HTTP 代理地址，例如 http://127.0.0.1:7890。留空则直连。",
+    "type": "string",
+    "default": ""
+  },
+  "kook_token": {
+    "description": "KOOK Bot Token",
+    "hint": "用于群聊撤回含 SGID/水鱼 Token 的消息。留空时会尝试从 KOOK 平台配置读取。",
+    "type": "string",
+    "default": ""
+  },
+  "warn_unsupported_recall": {
+    "description": "撤回不可用时提示",
+    "hint": "当前平台不支持自动撤回敏感消息时，是否在结果消息中提醒用户手动撤回。",
+    "type": "bool",
+    "default": true
+  }
+}
+
