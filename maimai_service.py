@@ -125,30 +125,31 @@ class MaimaiService:
         import_token: str,
     ) -> SyncResult:
         arcade_provider = self._arcade_provider()
+        player_name = ""
+        player_rating = 0
+        player_warning = ""
+        if hasattr(arcade_provider, "get_player"):
+            try:
+                player = await self.client.players(arcade_identifier, provider=arcade_provider)
+                player_name = str(getattr(player, "name", "") or "")
+                player_rating = int(getattr(player, "rating", 0) or 0)
+            except Exception as exc:
+                player_warning = f"官方玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+        else:
+            player_warning = "当前 maimai-py 机台数据源不提供官方玩家名预览。"
+
         scores = await self.client.scores(arcade_identifier, provider=arcade_provider)
         score_list = list(getattr(scores, "scores", []) or [])
+        score_rating = int(getattr(scores, "rating", 0) or 0)
         await self.client.updates(
             self._identifier(credentials=import_token),
             score_list,
             provider=self._divingfish_provider(),
         )
 
-        player_name = ""
-        rating = 0
-        player_warning = ""
-        try:
-            player = await self.client.players(
-                self._identifier(credentials=import_token),
-                provider=self._divingfish_provider(),
-            )
-            player_name = str(getattr(player, "name", "") or "")
-            rating = int(getattr(player, "rating", 0) or 0)
-        except Exception as exc:
-            player_warning = f"成绩已同步，但水鱼玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
-
         return SyncResult(
             player_name=player_name,
-            rating=rating,
+            rating=player_rating or score_rating,
             score_count=len(score_list),
             player_warning=player_warning,
         )

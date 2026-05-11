@@ -41,6 +41,7 @@ class FakePlayer:
 
 class FakeScores:
     scores = ["score1", "score2"]
+    rating = 14370
 
 
 class FakeClient:
@@ -110,13 +111,18 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.score_count, 2)
+        self.assertEqual(result.player_name, "XiAoLan")
+        self.assertEqual(result.rating, 14370)
         self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
         identifier, scores, provider = service.client.updated
         self.assertEqual(identifier.credentials, "import-token")
         self.assertEqual(scores, ["score1", "score2"])
         self.assertIsInstance(provider, FakeDivingFishProvider)
+        player_identifier, player_provider = service.client.player_input
+        self.assertEqual(player_identifier.credentials, "arcade-credentials")
+        self.assertIsInstance(player_provider, FakeArcadeProvider)
 
-    async def test_sync_from_sgid_to_divingfish_succeeds_when_preview_fails(self):
+    async def test_sync_from_sgid_to_divingfish_uses_score_rating_when_preview_fails(self):
         service = self.make_service(fail_players=True)
         result = await service.sync_from_sgid_to_divingfish(
             sgid="SGWCMAID-test",
@@ -124,8 +130,21 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.score_count, 2)
-        self.assertIn("水鱼玩家名/Rating", result.player_warning)
+        self.assertEqual(result.rating, 14370)
+        self.assertIn("官方玩家名/Rating", result.player_warning)
         self.assertIsNotNone(service.client.updated)
+
+    async def test_sync_from_sgid_to_divingfish_skips_player_for_provider_without_preview(self):
+        service = self.make_service(arcade_provider=FakeArcadeProviderWithoutPlayer)
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
+            import_token="import-token",
+        )
+
+        self.assertEqual(result.score_count, 2)
+        self.assertEqual(result.player_name, "")
+        self.assertEqual(result.rating, 14370)
+        self.assertIn("不提供官方玩家名", result.player_warning)
 
     async def test_describe_dependency_syntax_error(self):
         service = self.make_service()
