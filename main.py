@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import register
-from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
+from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.api.event.filter import EventMessageType, command, event_message_type
 from astrbot.api.star import Context, Star, StarTools
 
@@ -41,7 +41,7 @@ class SensitiveInput:
     "astrbot_plugin_maimai_updater",
     "User",
     "绑定舞萌官方二维码凭据和水鱼 Import-Token，并把机台成绩同步到水鱼。",
-    "0.1.3",
+    "0.1.4",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -80,7 +80,7 @@ class MaimaiUpdaterPlugin(Star):
         return f"{event.get_platform_name()}:{event.get_sender_id()}"
 
     async def _send_text(self, event: AstrMessageEvent, text: str) -> None:
-        await event.send(MessageChain().message(text))
+        await event.send(event.plain_result(text))
 
     async def _send_recall_notice(
         self,
@@ -146,12 +146,15 @@ class MaimaiUpdaterPlugin(Star):
             player_name=result.player_name,
             rating=result.rating,
         )
-        return self._message(
+        lines = [
             "✅ 官方账号绑定成功！\n"
             f"玩家名：{result.player_name or '未知'}\n"
             f"Rating：{result.rating}\n"
             "接下来可发送 /maimai_token <水鱼 Import-Token>，再用 /maimai_update 更新水鱼。"
-        )
+        ]
+        if result.player_warning:
+            lines.append(f"⚠️ {result.player_warning}")
+        return self._message("\n".join(lines))
 
     @command("maimai_token", alias={"水鱼token"})
     async def bind_token(self, event: AstrMessageEvent, token: str = ""):
@@ -220,13 +223,16 @@ class MaimaiUpdaterPlugin(Star):
             rating=result.rating,
             result=summary,
         )
-        return self._message(
-            "✅ 水鱼更新完成！\n"
-            f"玩家名：{result.player_name or record.player_name or '未知'}\n"
-            f"Rating：{result.rating}\n"
-            f"成绩数：{result.score_count}\n"
-            "现在可以用你现有的 B50 插件查询最新数据。"
-        )
+        lines = [
+            "✅ 水鱼更新完成！",
+            f"玩家名：{result.player_name or record.player_name or '未知'}",
+            f"Rating：{result.rating or record.rating}",
+            f"成绩数：{result.score_count}",
+            "现在可以用你现有的 B50 插件查询最新数据。",
+        ]
+        if result.player_warning:
+            lines.append(f"⚠️ {result.player_warning}")
+        return self._message("\n".join(lines))
 
     @command("maimai_status", alias={"水鱼状态"})
     async def status(self, event: AstrMessageEvent):

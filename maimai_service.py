@@ -13,6 +13,7 @@ class BindResult:
     arcade_credentials: str
     player_name: str
     rating: int
+    player_warning: str = ""
 
 
 @dataclass(slots=True)
@@ -20,6 +21,7 @@ class SyncResult:
     player_name: str
     rating: int
     score_count: int
+    player_warning: str = ""
 
 
 class MaimaiService:
@@ -97,14 +99,24 @@ class MaimaiService:
         if not isinstance(arcade_credentials, str) or not arcade_credentials:
             raise RuntimeError("二维码返回的凭据格式异常。")
 
-        player = await self.client.players(
-            self._identifier(credentials=arcade_credentials),
-            provider=self._arcade_provider(),
-        )
+        player_name = ""
+        rating = 0
+        player_warning = ""
+        try:
+            player = await self.client.players(
+                self._identifier(credentials=arcade_credentials),
+                provider=self._arcade_provider(),
+            )
+            player_name = str(getattr(player, "name", "") or "")
+            rating = int(getattr(player, "rating", 0) or 0)
+        except Exception as exc:
+            player_warning = f"二维码已解析，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+
         return BindResult(
             arcade_credentials=arcade_credentials,
-            player_name=str(getattr(player, "name", "") or ""),
-            rating=int(getattr(player, "rating", 0) or 0),
+            player_name=player_name,
+            rating=rating,
+            player_warning=player_warning,
         )
 
     async def sync_to_divingfish(
@@ -115,7 +127,6 @@ class MaimaiService:
     ) -> SyncResult:
         arcade_identifier = self._identifier(credentials=arcade_credentials)
         arcade_provider = self._arcade_provider()
-        player = await self.client.players(arcade_identifier, provider=arcade_provider)
         scores = await self.client.scores(arcade_identifier, provider=arcade_provider)
         score_list = list(getattr(scores, "scores", []) or [])
         await self.client.updates(
@@ -123,10 +134,22 @@ class MaimaiService:
             score_list,
             provider=self._divingfish_provider(),
         )
+
+        player_name = ""
+        rating = 0
+        player_warning = ""
+        try:
+            player = await self.client.players(arcade_identifier, provider=arcade_provider)
+            player_name = str(getattr(player, "name", "") or "")
+            rating = int(getattr(player, "rating", 0) or 0)
+        except Exception as exc:
+            player_warning = f"成绩已同步，但玩家名/Rating 暂时获取失败：{self.describe_error(exc)}"
+
         return SyncResult(
-            player_name=str(getattr(player, "name", "") or ""),
-            rating=int(getattr(player, "rating", 0) or 0),
+            player_name=player_name,
+            rating=rating,
             score_count=len(score_list),
+            player_warning=player_warning,
         )
 
     async def close(self) -> None:

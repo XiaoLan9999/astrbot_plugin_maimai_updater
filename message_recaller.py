@@ -145,8 +145,8 @@ class MessageRecaller:
                 )
             if resp.status_code == 200 and resp.json().get("code") == 0:
                 return RecallResult(True, True)
-        except Exception:
-            logger.exception("[MaimaiUpdater] KOOK recall failed")
+        except Exception as exc:
+            logger.warning("[MaimaiUpdater] KOOK recall failed: %s", exc)
             return RecallResult(True, False, "KOOK 撤回失败，请手动撤回敏感消息。")
         return RecallResult(True, False, "KOOK 撤回失败，请确认 Bot 拥有管理消息权限。")
 
@@ -159,6 +159,6 @@ class MessageRecaller:
             message_id: int | str = int(msg_id) if str(msg_id).isdigit() else msg_id
             await client.call_action("delete_msg", message_id=message_id)
             return RecallResult(True, True)
-        except Exception:
-            logger.exception("[MaimaiUpdater] OneBot recall failed")
+        except Exception as exc:
+            logger.warning("[MaimaiUpdater] OneBot recall failed: %s", exc)
             return RecallResult(True, False, "消息撤回失败，请确认 Bot 拥有撤回权限并手动撤回敏感消息。")
