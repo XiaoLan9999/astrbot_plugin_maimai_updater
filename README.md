@@ -7,22 +7,28 @@
 ## 功能
 
 - `maimaitoken <Import-Token>` / `水鱼token`：保存用户自己的水鱼 Import-Token。
-- 直接发送 `SGWCMAID...`：用这次官方二维码拉取成绩并更新水鱼。
-- `maimaiupdate <SGID>` / `更新水鱼` / `更新b50`：等价于直接发送 SGID，保留给需要显式命令的场景。
+- `水鱼更新 SGWCMAID...`：用这次官方二维码拉取成绩并更新水鱼。
+- `maimaiupdate <SGID>` / `更新水鱼` / `更新b50`：等价的 AstrBot 命令触发方式。
 - `maimaiclear 确认清空` / `清空水鱼 确认清空`：向水鱼发送清空成绩请求，用于误用他人 SGID 后手动处理。
 - `maimaistatus` / `水鱼状态`：查看 token 绑定状态、最近同步结果和当前 SGID 触发方式。
 - `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
 
 命令名已去除下划线。插件不再提供 `maimai_bind`，因为官方 SGID 只适合一次性使用，每次更新都需要用户重新提供新的二维码识别文本。
 
-## SGID 触发前缀
+## SGID 更新触发
 
-插件配置里可以设置 `sgid_update_prefix`：
+插件不会响应裸 `SGWCMAID...`，避免误触发或和其它插件冲突。默认用法是：
 
-- 留空：用户直接发送 `SGWCMAID...` 就会更新。
-- 填 `/`：用户需要发送 `/SGWCMAID...` 才会更新。
+```text
+水鱼更新 SGWCMAID...
+```
 
-这个前缀只影响“直发 SGID 更新”，不改变 AstrBot 自身的命令前缀规则。
+插件配置里可以调整：
+
+- `enable_text_update_trigger`：开启/关闭“水鱼更新 SGID”这种普通文本触发。
+- `text_update_command`：修改文本触发词，默认是 `水鱼更新`。
+
+如果关闭文本触发，仍可使用 AstrBot 命令 `maimaiupdate <SGID>`。
 
 ## 安全说明
 

@@ -96,7 +96,7 @@ def main() -> None:
     mark_font = load_font(24, bold=True)
 
     centered(draw, "maimai 水鱼更新器", 54, title_font, (17, 107, 156, 255))
-    centered(draw, "绑定水鱼 Token 后，直接发送本次 SGID 更新 B50", 120, subtitle_font, (47, 126, 168, 255))
+    centered(draw, "绑定水鱼 Token 后，发送“水鱼更新 SGID”更新 B50", 120, subtitle_font, (47, 126, 168, 255))
 
     def rounded_rect_with_shadow(box: tuple[int, int, int, int], radius: int = 24) -> None:
         x1, y1, x2, y2 = box
@@ -131,7 +131,7 @@ def main() -> None:
     arrow(374, 344, 456)
     card(474, 220, 2, "获取 SGID", "官方公众号 / 网页", "识别二维码文本", "180 秒内使用")
     arrow(776, 344, 858)
-    card(876, 220, 3, "直接更新", "发送 SGWCMAID...", "或 /SGWCMAID...", "群聊自动尝试撤回")
+    card(876, 220, 3, "触发更新", "水鱼更新", "SGWCMAID...", "群聊自动尝试撤回")
 
     rounded_rect_with_shadow((286, 526, 1114, 708))
     draw.text((340, 581), "完成后", font=card_title_font, fill=(18, 101, 143, 255))
