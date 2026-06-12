@@ -16,7 +16,7 @@ class MaimaiDependencyError(RuntimeError):
     pass
 
 
-MIN_MAIMAI_PY = (1, 4, 2)
+MIN_MAIMAI_PY = (1, 5, 1)
 MIN_MAIMAI_FFI = (0, 7, 0)
 
 
@@ -50,6 +50,8 @@ class SyncResult:
     rating: int
     score_count: int
     player_warning: str = ""
+    marked_score_count: int = 0
+    source: str = "arcade"
 
 
 class MaimaiService:
@@ -110,16 +112,6 @@ class MaimaiService:
                 "缺少 maimai-py 依赖，请先安装插件 requirements.txt。"
             ) from exc
 
-        try:
-            arcade_provider_probe = ArcadeProvider(http_proxy=self.http_proxy)
-        except TypeError:
-            arcade_provider_probe = ArcadeProvider()
-        if hasattr(arcade_provider_probe, "get_player"):
-            raise MaimaiDependencyError(
-                "当前 AstrBot 进程仍在使用旧版 maimai-py ArcadeProvider。"
-                "请完全关闭 AstrBot 后重新安装 requirements.txt，并重启 AstrBot。"
-            )
-
         self._imports = {
             "ArcadeProvider": ArcadeProvider,
             "DivingFishProvider": DivingFishProvider,
@@ -155,9 +147,9 @@ class MaimaiService:
     def _identifier(self, *, credentials: str) -> Any:
         return self._load_imports()["PlayerIdentifier"](credentials=credentials)
 
-    def _log_nonfatal_arcade_player_error(self, exc: BaseException, *, stage: str) -> None:
+    def _log_nonfatal_player_error(self, exc: BaseException, *, stage: str) -> None:
         logger.warning(
-            "[MaimaiUpdater] arcade player metadata fetch failed during %s: %s: %s",
+            "[MaimaiUpdater] player metadata fetch failed during %s: %s: %s",
             stage,
             exc.__class__.__name__,
             self.describe_error(exc),
@@ -182,6 +174,14 @@ class MaimaiService:
             raise RuntimeError("二维码返回的凭据格式异常。")
         return self._identifier(credentials=arcade_credentials), arcade_credentials
 
+    @staticmethod
+    def _count_score_marks(scores: list[Any]) -> int:
+        return sum(
+            1
+            for score in scores
+            if getattr(score, "fc", None) is not None or getattr(score, "fs", None) is not None
+        )
+
     async def bind_from_sgid(self, sgid: str) -> BindResult:
         await self._arcade_identifier_from_sgid(sgid)
         return BindResult()
@@ -192,20 +192,6 @@ class MaimaiService:
         import_token: str,
     ) -> SyncResult:
         arcade_provider = self._arcade_provider()
-        player_name = ""
-        player_rating = 0
-        player_warning = ""
-        if hasattr(arcade_provider, "get_player"):
-            try:
-                player = await self.client.players(arcade_identifier, provider=arcade_provider)
-                player_name = str(getattr(player, "name", "") or "")
-                player_rating = int(getattr(player, "rating", 0) or 0)
-            except Exception as exc:
-                self._log_nonfatal_arcade_player_error(exc, stage="update")
-                player_warning = "当前数据源不提供官方玩家名预览。"
-        else:
-            player_warning = "当前数据源不提供官方玩家名预览。"
-
         await self._prepare_song_cache_without_aliases()
         scores = await self.client.scores(arcade_identifier, provider=arcade_provider)
         score_list = list(getattr(scores, "scores", []) or [])
@@ -217,10 +203,12 @@ class MaimaiService:
         )
 
         return SyncResult(
-            player_name=player_name,
-            rating=player_rating or score_rating,
+            player_name="",
+            rating=score_rating,
             score_count=len(score_list),
-            player_warning=player_warning,
+            player_warning="当前 SGID 机台源只能提供基础成绩，暂时无法提供 FULL COMBO/FULL SYNC/AP 标识。",
+            marked_score_count=self._count_score_marks(score_list),
+            source="arcade",
         )
 
     async def sync_from_sgid_to_divingfish(

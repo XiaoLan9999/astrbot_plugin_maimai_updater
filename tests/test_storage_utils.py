@@ -37,7 +37,6 @@ class UtilsTest(unittest.TestCase):
         self.assertEqual(mask_secret("abcdef123456", 3, 3), "abc***456")
         self.assertEqual(mask_secret(""), "未绑定")
 
-
 class StorageTest(unittest.IsolatedAsyncioTestCase):
     async def test_user_store_roundtrip_and_unbind(self):
         with tempfile.TemporaryDirectory() as tmp:

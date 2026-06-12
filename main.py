@@ -25,8 +25,8 @@ from .utils import (
 @register(
     "astrbot_plugin_maimai_updater",
     "User",
-    "使用一次性舞萌官方二维码凭据，把机台成绩同步到水鱼。",
-    "0.3.3",
+    "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
+    "0.4.4",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -84,7 +84,7 @@ class MaimaiUpdaterPlugin(Star):
     def _prefixless_update_example() -> str:
         return "更新水鱼 SGWCMAID..."
 
-    def _extract_prefixless_update_sgid(self, text: str) -> str | None:
+    def _extract_prefixless_update_text(self, text: str) -> str | None:
         if not self.enable_prefixless_update_command:
             return None
         content = (text or "").strip()
@@ -97,7 +97,9 @@ class MaimaiUpdaterPlugin(Star):
             if suffix and suffix[0] not in " \t\r\n:：":
                 continue
             rest = suffix.strip().lstrip(":：").strip()
-            return extract_sgid(rest)
+            if extract_sgid(rest):
+                return rest
+            return None
         return None
 
     def _validate_sgid_for_one_time_use(self, sgid: str) -> str:
@@ -124,7 +126,7 @@ class MaimaiUpdaterPlugin(Star):
         recall = await self.recaller.recall_sensitive(event)
         await self._send_recall_notice(event, recall)
 
-    async def _update_from_sgid(self, event: AstrMessageEvent, sgid: str) -> None:
+    async def _update_from_credential(self, event: AstrMessageEvent, credential_text: str) -> None:
         user_key = self._user_key(event)
         record = self.store.get(user_key)
         if not record.divingfish_import_token:
@@ -132,6 +134,15 @@ class MaimaiUpdaterPlugin(Star):
                 event,
                 "❌ 尚未绑定水鱼 Import-Token。\n"
                 "请先执行 maimaitoken <水鱼 Import-Token>、水鱼绑定 <水鱼 Import-Token> 或 绑定水鱼 <水鱼 Import-Token>。",
+            )
+            return
+
+        sgid = extract_sgid(credential_text or "")
+        if not sgid:
+            await self._send_text(
+                event,
+                "❌ 凭据格式不正确。\n"
+                "请发送以 SGWCMAID 开头的官方二维码识别文本。",
             )
             return
 
@@ -143,7 +154,7 @@ class MaimaiUpdaterPlugin(Star):
             await self._send_text(event, f"❌ {validation_error}")
             return
 
-        await self._send_text(event, "⏳ 正在用本次 SGID 拉取机台成绩并同步到水鱼，请稍候...")
+        await self._send_text(event, "⏳ 正在用本次 SGID 拉取成绩并同步到水鱼，请稍候...")
         try:
             result = await self.service.sync_from_sgid_to_divingfish(
                 sgid=sgid,
@@ -161,6 +172,8 @@ class MaimaiUpdaterPlugin(Star):
             return
 
         summary = f"成功，同步 {result.score_count} 条成绩"
+        if result.marked_score_count:
+            summary += f"，含 {result.marked_score_count} 条特殊标识"
         await self.store.set_sync_result(
             user_key,
             rating=result.rating,
@@ -172,6 +185,8 @@ class MaimaiUpdaterPlugin(Star):
             f"成绩数：{result.score_count}",
             "现在可以用你现有的 B50 插件查询最新数据。",
         ]
+        if result.marked_score_count:
+            lines.insert(3, f"特殊标识：{result.marked_score_count} 条含 FC/FS/AP")
         if result.player_warning:
             lines.append(f"⚠️ {result.player_warning}")
         await self._send_text(event, "\n".join(lines))
@@ -204,17 +219,18 @@ class MaimaiUpdaterPlugin(Star):
         )
 
     @command("maimaiupdate", alias={"更新水鱼", "水鱼更新", "更新b50", "更新B50"})
-    async def update_scores(self, event: AstrMessageEvent, sgid_text: str = ""):
-        sgid = extract_sgid(sgid_text or "")
-        if not sgid:
+    async def update_scores(self, event: AstrMessageEvent, credential_text: str = ""):
+        credential_text = (credential_text or "").strip()
+        if not extract_sgid(credential_text):
             return self._message(
                 "用法：maimaiupdate <SGID>\n"
-                f"也可以发送：{self._prefixless_update_example()}"
+                f"也可以发送：{self._prefixless_update_example()}\n"
+                "注意：当前 SGID 机台源暂时无法提供 FULL COMBO/FULL SYNC/AP 标识。"
             )
 
         await self._recall_current_message(event)
         event.stop_event()
-        await self._update_from_sgid(event, sgid)
+        await self._update_from_credential(event, credential_text)
 
     @command("maimaiclear", alias={"清空水鱼", "清空b50", "清空B50"})
     async def clear_scores(self, event: AstrMessageEvent, confirm: str = ""):
@@ -282,13 +298,13 @@ class MaimaiUpdaterPlugin(Star):
 
     @event_message_type(EventMessageType.ALL)
     async def handle_prefixless_update_command(self, event: AstrMessageEvent):
-        sgid = self._extract_prefixless_update_sgid(event.message_str or "")
-        if not sgid:
+        credential_text = self._extract_prefixless_update_text(event.message_str or "")
+        if not credential_text:
             return
 
         await self._recall_current_message(event)
         event.stop_event()
-        await self._update_from_sgid(event, sgid)
+        await self._update_from_credential(event, credential_text)
 
     async def terminate(self):
         await self.service.close()
