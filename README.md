@@ -7,31 +7,36 @@
 ## 功能
 
 - `maimaitoken <Import-Token>` / `水鱼绑定` / `绑定水鱼`：保存用户自己的水鱼 Import-Token。
-- `更新水鱼 SGWCMAID...` / `水鱼更新 SGWCMAID...` / `更新b50 SGWCMAID...`：免 Bot 唤醒前缀的更新方式，可在面板中关闭。
-- `maimaiupdate <SGID>` / `更新水鱼` / `水鱼更新` / `更新b50`：标准 AstrBot 命令触发方式，按你的 AstrBot 配置可能需要 `/` 等 Bot 唤醒前缀。
+- `maimaiupdate <SGID>` / `更新水鱼` / `水鱼更新` / `更新b50`：使用本次官方 SGID 更新水鱼成绩。
 - `maimaiclear 确认清空` / `清空水鱼 确认清空` / `清空b50 确认清空`：向水鱼发送清空成绩请求，用于误用他人 SGID 后手动处理。
 - `maimaistatus` / `水鱼状态`：查看 token 绑定状态、最近同步结果和当前更新触发方式。
 - `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
 
 命令名已去除下划线。插件不再提供 `maimai_bind`，因为官方 SGID 只适合一次性使用，每次更新都需要用户重新提供新的二维码识别文本。
 
-## 更新触发
+## 命令触发
 
 插件不会响应裸 `SGWCMAID...`，避免误触发或和其它插件冲突。
 
-默认开启 `enable_prefixless_update_command`，所以可以把原本需要 Bot 唤醒前缀的更新命令：
+默认开启 `require_command_prefix`，插件只响应 AstrBot 标准命令触发。实际前缀取决于你的 Bot 配置，例如：
 
 ```text
+/水鱼状态
+/水鱼绑定 <Import-Token>
 /更新水鱼 SGWCMAID...
 ```
 
-简化为：
+如果在面板关闭 `require_command_prefix`，本插件所有命令都可以不带 Bot 唤醒前缀直接发送：
 
 ```text
+水鱼状态
+水鱼绑定 <Import-Token>
 更新水鱼 SGWCMAID...
+清空水鱼 确认清空
+水鱼解绑
 ```
 
-如果关闭 `enable_prefixless_update_command`，插件只响应标准 AstrBot 命令触发，例如 `/更新水鱼 SGWCMAID...` 或 `maimaiupdate <SGID>`。
+关闭该开关只影响本插件自己的命令，不会让裸 `SGWCMAID...` 自动更新。
 
 ## 成绩标识说明
 

@@ -22,11 +22,20 @@ from .utils import (
 )
 
 
+PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("token", ("maimaitoken", "水鱼绑定", "绑定水鱼")),
+    ("update", ("maimaiupdate", "更新水鱼", "水鱼更新", "更新B50", "更新b50")),
+    ("clear", ("maimaiclear", "清空水鱼", "清空B50", "清空b50")),
+    ("status", ("maimaistatus", "水鱼状态")),
+    ("unbind", ("maimaiunbind", "水鱼解绑")),
+)
+
+
 @register(
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.4.4",
+    "0.5.0",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -38,9 +47,7 @@ class MaimaiUpdaterPlugin(Star):
         data_dir = StarTools.get_data_dir(plugin_name="astrbot_plugin_maimai_updater")
         self.store = UserStore(data_dir)
 
-        self.enable_prefixless_update_command = bool(
-            self.config.get("enable_prefixless_update_command", True)
-        )
+        self.require_command_prefix = bool(self.config.get("require_command_prefix", True))
         self.enable_clear_command = bool(self.config.get("enable_clear_command", True))
         self.warn_unsupported_recall = bool(self.config.get("warn_unsupported_recall", True))
         self.service = MaimaiService(
@@ -84,22 +91,28 @@ class MaimaiUpdaterPlugin(Star):
     def _prefixless_update_example() -> str:
         return "更新水鱼 SGWCMAID..."
 
-    def _extract_prefixless_update_text(self, text: str) -> str | None:
-        if not self.enable_prefixless_update_command:
+    @staticmethod
+    def _split_plain_command(content: str, command_text: str) -> str | None:
+        if content == command_text:
+            return ""
+        if not content.startswith(command_text):
+            return None
+        suffix = content[len(command_text):]
+        if suffix and suffix[0] not in " \t\r\n:：":
+            return None
+        return suffix.strip().lstrip(":：").strip()
+
+    def _parse_plain_command(self, text: str) -> tuple[str, str] | None:
+        if self.require_command_prefix:
             return None
         content = (text or "").strip()
         if not content:
             return None
-        for command_text in ("maimaiupdate", "更新水鱼", "水鱼更新", "更新B50", "更新b50"):
-            if not content.startswith(command_text):
-                continue
-            suffix = content[len(command_text):]
-            if suffix and suffix[0] not in " \t\r\n:：":
-                continue
-            rest = suffix.strip().lstrip(":：").strip()
-            if extract_sgid(rest):
-                return rest
-            return None
+        for command_key, command_names in PLAIN_COMMANDS:
+            for command_text in command_names:
+                argument = self._split_plain_command(content, command_text)
+                if argument is not None:
+                    return command_key, argument
         return None
 
     def _validate_sgid_for_one_time_use(self, sgid: str) -> str:
@@ -125,6 +138,14 @@ class MaimaiUpdaterPlugin(Star):
     async def _recall_current_message(self, event: AstrMessageEvent) -> None:
         recall = await self.recaller.recall_sensitive(event)
         await self._send_recall_notice(event, recall)
+
+    async def _send_command_result(
+        self,
+        event: AstrMessageEvent,
+        result: MessageEventResult | None,
+    ) -> None:
+        if result is not None:
+            await event.send(result)
 
     async def _update_from_credential(self, event: AstrMessageEvent, credential_text: str) -> None:
         user_key = self._user_key(event)
@@ -212,19 +233,28 @@ class MaimaiUpdaterPlugin(Star):
             return
 
         await self.store.set_import_token(self._user_key(event), token)
+        if self.require_command_prefix:
+            update_hint = (
+                "之后带 Bot 唤醒前缀执行 "
+                f"maimaiupdate <SGID> / {self._prefixless_update_example()} 即可更新 B50。"
+            )
+        else:
+            update_hint = f"之后直接发送 {self._prefixless_update_example()} 即可更新 B50。"
         await self._send_text(
             event,
             f"✅ 水鱼绑定成功：{mask_secret(token)}\n"
-            f"之后发送 {self._prefixless_update_example()} 即可更新 B50。",
+            f"{update_hint}",
         )
 
     @command("maimaiupdate", alias={"更新水鱼", "水鱼更新", "更新b50", "更新B50"})
     async def update_scores(self, event: AstrMessageEvent, credential_text: str = ""):
         credential_text = (credential_text or "").strip()
         if not extract_sgid(credential_text):
+            update_usage = self._prefixless_update_example()
+            if self.require_command_prefix:
+                update_usage = f"maimaiupdate <SGID> / {self._prefixless_update_example()}"
             return self._message(
-                "用法：maimaiupdate <SGID>\n"
-                f"也可以发送：{self._prefixless_update_example()}\n"
+                f"用法：{update_usage}\n"
                 "注意：当前 SGID 机台源暂时无法提供 FULL COMBO/FULL SYNC/AP 标识。"
             )
 
@@ -276,10 +306,13 @@ class MaimaiUpdaterPlugin(Star):
     async def status(self, event: AstrMessageEvent):
         record = self.store.get(self._user_key(event))
         lines = ["📋 maimai 水鱼更新状态"]
-        prefixless_update = "开启" if self.enable_prefixless_update_command else "关闭"
-        lines.append(f"免前缀更新命令：{prefixless_update}")
-        if self.enable_prefixless_update_command:
-            lines.append(f"免前缀用法：{self._prefixless_update_example()}")
+        prefix_required = "需要" if self.require_command_prefix else "不需要"
+        lines.append(f"唤醒前缀：{prefix_required}")
+        if not self.require_command_prefix:
+            lines.append(
+                "免前缀用法：水鱼状态 / 水鱼绑定 <Token> / "
+                f"{self._prefixless_update_example()}"
+            )
         lines.append("官方 SGID：不保存，每次更新都需要临时提供")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
         if record.rating:
@@ -297,14 +330,26 @@ class MaimaiUpdaterPlugin(Star):
         return self._message("当前没有保存的绑定信息。")
 
     @event_message_type(EventMessageType.ALL)
-    async def handle_prefixless_update_command(self, event: AstrMessageEvent):
-        credential_text = self._extract_prefixless_update_text(event.message_str or "")
-        if not credential_text:
+    async def handle_plain_command(self, event: AstrMessageEvent):
+        parsed = self._parse_plain_command(event.message_str or "")
+        if not parsed:
             return
 
-        await self._recall_current_message(event)
         event.stop_event()
-        await self._update_from_credential(event, credential_text)
+        command_key, argument = parsed
+        if command_key == "token":
+            result = await self.bind_token(event, argument)
+        elif command_key == "update":
+            result = await self.update_scores(event, argument)
+        elif command_key == "clear":
+            result = await self.clear_scores(event, argument)
+        elif command_key == "status":
+            result = await self.status(event)
+        elif command_key == "unbind":
+            result = await self.unbind(event)
+        else:
+            return
+        await self._send_command_result(event, result)
 
     async def terminate(self):
         await self.service.close()

@@ -1,7 +1,7 @@
 {
-  "enable_prefixless_update_command": {
-    "description": "启用免前缀更新命令",
-    "hint": "开启后，用户可以在群聊/私聊直接发送“更新水鱼 SGWCMAID...”“水鱼更新 SGWCMAID...”或“更新b50 SGWCMAID...”。关闭后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /更新水鱼 SGWCMAID...。",
+  "require_command_prefix": {
+    "description": "需要唤醒前缀",
+    "hint": "开启后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件所有命令都可以直接发送，例如 水鱼状态、水鱼绑定 <Token>、更新水鱼 SGWCMAID...。裸 SGID 仍不会触发。",
     "type": "bool",
     "default": true
   },
