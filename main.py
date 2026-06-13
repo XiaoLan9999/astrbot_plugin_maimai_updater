@@ -18,6 +18,8 @@ from .utils import (
     is_probable_import_token,
     is_probable_sgid,
     mask_secret,
+    parse_bool,
+    require_command_prefix_from_config,
     validate_sgid_freshness,
 )
 
@@ -35,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.5.0",
+    "0.5.1",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -47,9 +49,9 @@ class MaimaiUpdaterPlugin(Star):
         data_dir = StarTools.get_data_dir(plugin_name="astrbot_plugin_maimai_updater")
         self.store = UserStore(data_dir)
 
-        self.require_command_prefix = bool(self.config.get("require_command_prefix", True))
-        self.enable_clear_command = bool(self.config.get("enable_clear_command", True))
-        self.warn_unsupported_recall = bool(self.config.get("warn_unsupported_recall", True))
+        self.require_command_prefix = self._require_command_prefix_config()
+        self.enable_clear_command = self._bool_config("enable_clear_command", True)
+        self.warn_unsupported_recall = self._bool_config("warn_unsupported_recall", True)
         self.service = MaimaiService(
             timeout=self._int_config("request_timeout_seconds", 30),
             http_proxy=str(self.config.get("maimai_http_proxy", "") or ""),
@@ -66,6 +68,12 @@ class MaimaiUpdaterPlugin(Star):
             return int(self.config.get(key, default))
         except (TypeError, ValueError):
             return default
+
+    def _bool_config(self, key: str, default: bool) -> bool:
+        return parse_bool(self.config.get(key, default), default)
+
+    def _require_command_prefix_config(self) -> bool:
+        return require_command_prefix_from_config(self.config)
 
     @staticmethod
     def _message(text: str) -> MessageEventResult:
@@ -98,7 +106,7 @@ class MaimaiUpdaterPlugin(Star):
         if not content.startswith(command_text):
             return None
         suffix = content[len(command_text):]
-        if suffix and suffix[0] not in " \t\r\n:：":
+        if suffix and suffix[0] not in " \t\r\n:：　":
             return None
         return suffix.strip().lstrip(":：").strip()
 

@@ -13,6 +13,8 @@ from astrbot_plugin_maimai_updater.utils import (
     is_probable_import_token,
     is_probable_sgid,
     mask_secret,
+    parse_bool,
+    require_command_prefix_from_config,
     sgid_issued_at,
     validate_sgid_freshness,
 )
@@ -36,6 +38,26 @@ class UtilsTest(unittest.TestCase):
         self.assertFalse(is_probable_import_token("short-token"))
         self.assertEqual(mask_secret("abcdef123456", 3, 3), "abc***456")
         self.assertEqual(mask_secret(""), "未绑定")
+
+    def test_parse_bool_accepts_panel_strings(self):
+        self.assertTrue(parse_bool("true", False))
+        self.assertTrue(parse_bool("开启", False))
+        self.assertFalse(parse_bool("false", True))
+        self.assertFalse(parse_bool("关闭", True))
+        self.assertTrue(parse_bool("unknown", True))
+        self.assertFalse(parse_bool("unknown", False))
+
+    def test_require_command_prefix_config_handles_panel_and_legacy_values(self):
+        self.assertTrue(require_command_prefix_from_config({}))
+        self.assertFalse(require_command_prefix_from_config({"require_command_prefix": "false"}))
+        self.assertFalse(require_command_prefix_from_config({"require_command_prefix": False}))
+        self.assertTrue(require_command_prefix_from_config({"require_command_prefix": "true"}))
+        self.assertFalse(
+            require_command_prefix_from_config({"enable_prefixless_update_command": "true"})
+        )
+        self.assertTrue(
+            require_command_prefix_from_config({"enable_prefixless_update_command": "false"})
+        )
 
 class StorageTest(unittest.IsolatedAsyncioTestCase):
     async def test_user_store_roundtrip_and_unbind(self):

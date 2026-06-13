@@ -1,7 +1,7 @@
 {
   "require_command_prefix": {
     "description": "需要唤醒前缀",
-    "hint": "开启后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件所有命令都可以直接发送，例如 水鱼状态、水鱼绑定 <Token>、更新水鱼 SGWCMAID...。裸 SGID 仍不会触发。",
+    "hint": "开启后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件所有命令都可以直接发送，例如 水鱼状态、水鱼绑定 <Token>、绑定水鱼 <Token>、更新水鱼 SGWCMAID...。裸 SGID 仍不会触发。",
     "type": "bool",
     "default": true
   },

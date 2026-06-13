@@ -88,6 +88,44 @@ def mask_secret(value: Any, visible_prefix: int = 6, visible_suffix: int = 4) ->
     return f"{text[:visible_prefix]}***{text[-visible_suffix:]}"
 
 
+def parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "enable", "enabled", "开启", "开", "是"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "disable", "disabled", "关闭", "关", "否", ""}:
+        return False
+    return default
+
+
+def config_get(config: Any, key: str, default: Any = None) -> Any:
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        return getter(key, default)
+    try:
+        return config[key]
+    except (KeyError, TypeError):
+        return default
+
+
+def require_command_prefix_from_config(config: Any) -> bool:
+    configured = config_get(config, "require_command_prefix", None)
+    if configured is not None:
+        return parse_bool(configured, True)
+
+    legacy_prefixless = config_get(config, "enable_prefixless_update_command", None)
+    if legacy_prefixless is not None:
+        return not parse_bool(legacy_prefixless, False)
+
+    return True
+
+
 def safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)

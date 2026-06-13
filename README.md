@@ -31,12 +31,15 @@
 ```text
 水鱼状态
 水鱼绑定 <Import-Token>
+绑定水鱼 <Import-Token>
 更新水鱼 SGWCMAID...
 清空水鱼 确认清空
 水鱼解绑
 ```
 
 关闭该开关只影响本插件自己的命令，不会让裸 `SGWCMAID...` 自动更新。
+
+从旧版本升级时，如果配置文件里仍然保留 `enable_prefixless_update_command`，插件会在运行时兼容它：旧开关为开启时，会按“本插件命令不需要唤醒前缀”处理。
 
 ## 成绩标识说明
 
