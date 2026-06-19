@@ -10,6 +10,7 @@ from astrbot_plugin_maimai_updater.maimai_service import (
     MaimaiDependencyError,
     MaimaiService,
     _is_version_at_least,
+    _patch_maimai_current_version,
 )
 
 
@@ -129,6 +130,38 @@ class VersionTest(unittest.TestCase):
         self.assertTrue(_is_version_at_least("0.7.0.post1", (0, 7, 0)))
         self.assertFalse(_is_version_at_least("0.9.5", (1, 4, 2)))
         self.assertFalse(_is_version_at_least("0.6.9", (0, 7, 0)))
+
+    def test_patch_current_version_promotes_maimai2026(self):
+        class FakeVersion:
+            MAIMAI_DX_PRISM_PLUS = 25500
+            MAIMAI_DX_CIRCLE = 26000
+
+        class FakeEnums:
+            Version = FakeVersion
+            current_version = FakeVersion.MAIMAI_DX_PRISM_PLUS
+
+        class FakeMaimaiModule:
+            current_version = FakeVersion.MAIMAI_DX_PRISM_PLUS
+
+        self.assertTrue(_patch_maimai_current_version(FakeEnums, FakeMaimaiModule))
+        self.assertEqual(FakeEnums.current_version, FakeVersion.MAIMAI_DX_CIRCLE)
+        self.assertEqual(FakeMaimaiModule.current_version, FakeVersion.MAIMAI_DX_CIRCLE)
+
+    def test_patch_current_version_keeps_newer_version(self):
+        class FakeVersion:
+            MAIMAI_DX_CIRCLE = 26000
+            MAIMAI_DX_CIRCLE_PLUS = 26500
+
+        class FakeEnums:
+            Version = FakeVersion
+            current_version = FakeVersion.MAIMAI_DX_CIRCLE_PLUS
+
+        class FakeMaimaiModule:
+            current_version = FakeVersion.MAIMAI_DX_CIRCLE_PLUS
+
+        self.assertFalse(_patch_maimai_current_version(FakeEnums, FakeMaimaiModule))
+        self.assertEqual(FakeEnums.current_version, FakeVersion.MAIMAI_DX_CIRCLE_PLUS)
+        self.assertEqual(FakeMaimaiModule.current_version, FakeVersion.MAIMAI_DX_CIRCLE_PLUS)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@
 
 当前用户侧可用的更新凭据仍然是 SGID。复制微信公众号/maimaiNET 的 OAuth 回调链接不可行，因为它依赖微信内置浏览器授权上下文，Bot 所在机器直接访问会失败。
 
-需要注意：maimai.py 当前公开的 SGID 机台数据源只返回达成率、DX 分等基础字段，不包含 FC/FS/AP 标识。已检查 `maimai-py==1.5.1`，该版本修正了 2026 新版本 Rating 分组，但仍未给 SGID/ArcadeProvider 增加 FC/FS/AP 字段。因此当前插件可以更新基础成绩，但还不能补全 FULL COMBO、FULL SYNC、ALL PERFECT 等特殊标识。要补全这些标识，需要后续接入“SGID -> 官方详细成绩”的新接口或实现。
+需要注意：maimai.py 当前公开的 SGID 机台数据源只返回达成率、DX 分等基础字段，不包含 FC/FS/AP 标识。已检查 `maimai-py==1.5.1`，该版本已经包含 MAIMAI2026 的版本枚举，但国服 `current_version` 仍可能停留在 PRiSM PLUS；插件会在运行时把它修正到 `MAIMAI_DX_CIRCLE`，避免 B35/B15 分组沿用旧版本导致 Rating 偏低。因此当前插件可以更新基础成绩，但还不能补全 FULL COMBO、FULL SYNC、ALL PERFECT 等特殊标识。要补全这些标识，需要后续接入“SGID -> 官方详细成绩”的新接口或实现。
 
 ## 安全说明
 

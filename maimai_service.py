@@ -18,6 +18,7 @@ class MaimaiDependencyError(RuntimeError):
 
 MIN_MAIMAI_PY = (1, 5, 1)
 MIN_MAIMAI_FFI = (0, 7, 0)
+MIN_CN_CURRENT_VERSION_NAME = "MAIMAI_DX_CIRCLE"
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -37,6 +38,28 @@ def _is_version_at_least(version: str, minimum: tuple[int, ...]) -> bool:
     parsed = _parse_version(version)
     width = max(len(parsed), len(minimum))
     return parsed + (0,) * (width - len(parsed)) >= minimum + (0,) * (width - len(minimum))
+
+
+def _version_value(version: Any) -> int:
+    try:
+        return int(getattr(version, "value", version) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _patch_maimai_current_version(enums_module: Any, maimai_module: Any) -> bool:
+    version_cls = getattr(enums_module, "Version", None)
+    minimum_current = getattr(version_cls, MIN_CN_CURRENT_VERSION_NAME, None)
+    if minimum_current is None:
+        return False
+
+    patched = False
+    for module in (enums_module, maimai_module):
+        current = getattr(module, "current_version", None)
+        if _version_value(current) < _version_value(minimum_current):
+            setattr(module, "current_version", minimum_current)
+            patched = True
+    return patched
 
 
 @dataclass(slots=True)
@@ -101,6 +124,8 @@ class MaimaiService:
                 PlayerIdentifier,
             )
             from maimai_py import exceptions as maimai_exceptions  # type: ignore
+            from maimai_py import enums as maimai_enums  # type: ignore
+            from maimai_py import maimai as maimai_core  # type: ignore
             import httpx
         except SyntaxError as exc:
             raise MaimaiDependencyError(
@@ -111,6 +136,12 @@ class MaimaiService:
             raise MaimaiDependencyError(
                 "缺少 maimai-py 依赖，请先安装插件 requirements.txt。"
             ) from exc
+
+        if _patch_maimai_current_version(maimai_enums, maimai_core):
+            logger.info(
+                "[MaimaiUpdater] patched maimai.py current_version to %s for MAIMAI2026 rating",
+                MIN_CN_CURRENT_VERSION_NAME,
+            )
 
         self._imports = {
             "ArcadeProvider": ArcadeProvider,
