@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import types
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -39,10 +40,62 @@ class FakeArcadeScores:
     rating = 14370
 
 
+class FakeScore:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class FakeFCType:
+    __members__ = {"FC": "FC", "FCP": "FCP", "AP": "AP", "APP": "APP"}
+
+
+class FakeFSType:
+    __members__ = {"SYNC": "SYNC", "FS": "FS", "FSP": "FSP", "FSD": "FSD", "FSDP": "FSDP"}
+
+
+class FakeLevelIndex(int):
+    pass
+
+
+class FakeRateType:
+    @staticmethod
+    def _from_achievement(achievement):
+        return f"rate:{achievement:.4f}"
+
+
+class FakeSongType:
+    STANDARD = "standard"
+    UTAGE = "utage"
+
+    @staticmethod
+    def _from_id(music_id):
+        return FakeSongType.UTAGE if int(music_id) >= 100000 else FakeSongType.STANDARD
+
+
+class FakeDifficulty:
+    level = "14+"
+
+
+class FakeSong:
+    def get_difficulty(self, song_type, level_index):
+        self.last_difficulty = (song_type, level_index)
+        return FakeDifficulty()
+
+
+class FakeSongs:
+    def __init__(self):
+        self.ids = []
+
+    async def by_id(self, music_id):
+        self.ids.append(music_id)
+        return FakeSong()
+
+
 class FakeClient:
     def __init__(self, fail_players: bool = False):
         self.updated = None
         self.fail_players = fail_players
+        self.songs_object = FakeSongs()
 
     async def qrcode(self, qrcode: str, http_proxy=None):
         self.qrcode_input = (qrcode, http_proxy)
@@ -54,6 +107,7 @@ class FakeClient:
 
     async def songs(self, **kwargs):
         self.songs_input = kwargs
+        return self.songs_object
 
     async def updates(self, identifier, scores, provider):
         self.updated = (identifier, scores, provider)
@@ -70,6 +124,12 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
             "ArcadeProvider": FakeArcadeProvider,
             "DivingFishProvider": FakeDivingFishProvider,
             "PlayerIdentifier": FakeIdentifier,
+            "Score": FakeScore,
+            "FCType": FakeFCType,
+            "FSType": FakeFSType,
+            "LevelIndex": FakeLevelIndex,
+            "RateType": FakeRateType,
+            "SongType": FakeSongType,
         }
         service._client = FakeClient(fail_players=fail_players)
         return service
@@ -82,8 +142,59 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
         self.assertFalse(hasattr(service.client, "scores_input"))
 
-    async def test_sync_from_sgid_to_divingfish_uses_arcade_scores(self):
+    async def test_sync_from_sgid_defaults_to_official_full_score_path(self):
         service = self.make_service()
+
+        async def fake_user_id_from_sgid(sgid: str) -> int:
+            service.seen_sgid = sgid
+            return 24681357
+
+        async def fake_fetch(user_id: int):
+            service.seen_user_id = user_id
+            return (
+                [
+                    {
+                        "musicId": 11026,
+                        "level": 4,
+                        "achievement": 1001481,
+                        "comboStatus": 3,
+                        "syncStatus": 4,
+                        "deluxeScoreMax": 2914,
+                        "playCount": 7,
+                    }
+                ],
+                14370,
+                "https://wq.sys-all.cn/Maimai2Servlet/",
+            )
+
+        service._official_user_id_from_sgid = fake_user_id_from_sgid
+        service._fetch_official_details_and_rating = fake_fetch
+
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
+            import_token="import-token",
+        )
+
+        self.assertEqual(service.seen_sgid, "SGWCMAID-test")
+        self.assertEqual(service.seen_user_id, 24681357)
+        self.assertFalse(hasattr(service.client, "qrcode_input"))
+        self.assertEqual(result.source, "official")
+        self.assertEqual(result.score_count, 1)
+        self.assertEqual(result.rating, 14370)
+        self.assertEqual(result.marked_score_count, 1)
+        self.assertEqual(result.player_warning, "")
+        identifier, scores, provider = service.client.updated
+        self.assertEqual(identifier.credentials, "import-token")
+        self.assertIsInstance(provider, FakeDivingFishProvider)
+        self.assertEqual(len(scores), 1)
+        self.assertEqual(scores[0].id, 1026)
+        self.assertEqual(scores[0].fc, "AP")
+        self.assertEqual(scores[0].fs, "FSDP")
+        self.assertEqual(scores[0].dx_score, 2914)
+        self.assertEqual(scores[0].level, "14+")
+
+    async def test_sync_from_sgid_to_divingfish_uses_arcade_scores_when_explicit(self):
+        service = self.make_service(score_source_mode="arcade")
         result = await service.sync_from_sgid_to_divingfish(
             sgid="SGWCMAID-test",
             import_token="import-token",
@@ -93,7 +204,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.rating, 14370)
         self.assertEqual(result.marked_score_count, 0)
         self.assertEqual(result.source, "arcade")
-        self.assertIn("基础成绩", result.player_warning)
+        self.assertIn("FULL COMBO", result.player_warning)
         self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
         self.assertEqual(service.client.songs_input, {"alias_provider": None})
         score_identifier, score_provider = service.client.scores_input
@@ -113,46 +224,72 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scores, [])
         self.assertIsInstance(provider, FakeDivingFishProvider)
 
-    async def test_official_only_without_config_does_not_fallback_to_arcade(self):
-        service = self.make_service(score_source_mode="official_only")
+    async def test_official_sgid_resolver_captures_user_id_without_saving_sgid(self):
+        service = self.make_service()
+        fake_arcade = types.SimpleNamespace()
 
-        with self.assertRaises(OfficialProtocolUnavailableError):
-            await service.sync_from_sgid_to_divingfish(
-                sgid="SGWCMAID-test",
-                import_token="import-token",
-            )
+        class FakeFernet:
+            def __init__(self, *args, **kwargs):
+                pass
 
-        self.assertFalse(hasattr(service.client, "qrcode_input"))
-        self.assertIsNone(service.client.updated)
+            def encrypt(self, data: bytes) -> bytes:
+                return b"encrypted-user-id"
 
-    async def test_official_then_arcade_without_config_uses_arcade_scores(self):
-        service = self.make_service(score_source_mode="official_then_arcade")
-        result = await service.sync_from_sgid_to_divingfish(
-            sgid="SGWCMAID-test",
-            import_token="import-token",
-        )
+            def decrypt(self, token: bytes) -> bytes:
+                return b""
 
-        self.assertEqual(result.source, "arcade")
-        self.assertEqual(result.score_count, 2)
-        self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
+        async def fake_get_uid_encrypted(code: str, http_proxy=None):
+            fake_arcade.call = (code, http_proxy)
+            return fake_arcade.Fernet(b"key").encrypt(b"12345678")
+
+        fake_arcade.Fernet = FakeFernet
+        fake_arcade.get_uid_encrypted = fake_get_uid_encrypted
+        fake_pkg = types.ModuleType("maimai_ffi")
+        fake_pkg.arcade = fake_arcade
+        old_pkg = sys.modules.get("maimai_ffi")
+        old_arcade = sys.modules.get("maimai_ffi.arcade")
+        sys.modules["maimai_ffi"] = fake_pkg
+        sys.modules["maimai_ffi.arcade"] = fake_arcade
+        try:
+            user_id = await service._official_user_id_from_sgid("SGWCMAID-test")
+        finally:
+            if old_pkg is None:
+                sys.modules.pop("maimai_ffi", None)
+            else:
+                sys.modules["maimai_ffi"] = old_pkg
+            if old_arcade is None:
+                sys.modules.pop("maimai_ffi.arcade", None)
+            else:
+                sys.modules["maimai_ffi.arcade"] = old_arcade
+
+        self.assertEqual(user_id, 12345678)
+        self.assertEqual(fake_arcade.call, ("SGWCMAID-test", "http://127.0.0.1:7890"))
+        self.assertIs(fake_arcade.Fernet, FakeFernet)
 
     def test_legacy_official_flag_maps_to_official_only(self):
         service = MaimaiService(official_protocol_enabled=True)
 
         self.assertEqual(service._score_source_mode(), "official_only")
 
-    async def test_describe_dependency_syntax_error(self):
+    def test_describe_dependency_syntax_error(self):
         service = self.make_service()
         syntax_error = SyntaxError("bad syntax")
         syntax_error.filename = "__init__.py"
         syntax_error.lineno = 94
-        exc = MaimaiDependencyError("依赖导入失败")
+        exc = MaimaiDependencyError("dependency import failed")
         exc.__cause__ = syntax_error
 
         message = service.describe_error(exc)
-        self.assertIn("依赖导入失败", message)
+        self.assertIn("dependency import failed", message)
         self.assertIn("__init__.py", message)
         self.assertIn("line 94", message)
+
+    def test_describe_official_unavailable_mentions_builtin_sgid_path(self):
+        service = self.make_service()
+        message = service.describe_error(OfficialProtocolUnavailableError("no user id"))
+        self.assertIn("SGID", message)
+        self.assertIn("userId", message)
+        self.assertNotIn("chimelib", message)
 
 
 class VersionTest(unittest.TestCase):

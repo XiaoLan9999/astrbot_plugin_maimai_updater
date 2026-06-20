@@ -24,7 +24,7 @@
   },
   "request_timeout_seconds": {
     "description": "网络请求超时时间",
-    "hint": "请求舞萌机台数据源和水鱼接口的超时时间。",
+    "hint": "请求舞萌官方标题服和水鱼接口的超时时间。",
     "type": "int",
     "slider": {
       "min": 5,

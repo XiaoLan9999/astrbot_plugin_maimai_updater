@@ -41,6 +41,42 @@ class ChimeSession:
     token: str
 
 
+@dataclass(frozen=True, slots=True)
+class OfficialTitleEndpoint:
+    base_url: str
+    host_header: str = ""
+    verify_tls: bool = True
+
+
+OFFICIAL_TITLE_HOSTS = (
+    "wq.sys-all.cn",
+    "ai.sys-all.cn",
+    "wi.sys-all.cn",
+    "at.sys-all.cn",
+)
+OFFICIAL_TITLE_IP = "43.137.89.146"
+OFFICIAL_TITLE_PATH = "Maimai2Servlet/"
+DEFAULT_OFFICIAL_TITLE_ENDPOINTS = (
+    *(OfficialTitleEndpoint(f"https://{host}/{OFFICIAL_TITLE_PATH}") for host in OFFICIAL_TITLE_HOSTS),
+    *(
+        OfficialTitleEndpoint(
+            f"https://{OFFICIAL_TITLE_IP}/{OFFICIAL_TITLE_PATH}",
+            host_header=host,
+            verify_tls=False,
+        )
+        for host in OFFICIAL_TITLE_HOSTS
+    ),
+    *(
+        OfficialTitleEndpoint(
+            f"http://{OFFICIAL_TITLE_IP}/{OFFICIAL_TITLE_PATH}",
+            host_header=host,
+            verify_tls=True,
+        )
+        for host in OFFICIAL_TITLE_HOSTS
+    ),
+)
+
+
 @dataclass(slots=True)
 class OfficialSyncPayload:
     user_id: int
@@ -269,6 +305,8 @@ class OfficialTitleClient:
         client_id: str,
         timeout: float = 30.0,
         http_proxy: str | None = None,
+        host_header: str = "",
+        verify_tls: bool = True,
     ) -> None:
         if not base_url:
             raise OfficialProtocolUnavailableError("official title base URL is not configured")
@@ -276,6 +314,8 @@ class OfficialTitleClient:
         self.client_id = client_id or ""
         self.timeout = float(timeout or 30.0)
         self.http_proxy = (http_proxy or "").strip() or None
+        self.host_header = (host_header or "").strip()
+        self.verify_tls = bool(verify_tls)
         self._client: Any | None = None
 
     def _http_client(self) -> Any:
@@ -286,7 +326,7 @@ class OfficialTitleClient:
         except ImportError as exc:  # pragma: no cover - depends on deployed deps.
             raise OfficialProtocolUnavailableError("httpx is required for official title protocol") from exc
 
-        kwargs: dict[str, Any] = {"timeout": self.timeout}
+        kwargs: dict[str, Any] = {"timeout": self.timeout, "verify": self.verify_tls}
         if self.http_proxy:
             kwargs["proxy"] = self.http_proxy
         self._client = httpx.AsyncClient(**kwargs)
@@ -307,6 +347,8 @@ class OfficialTitleClient:
             "Content-Encoding": "deflate",
             "User-Agent": f"{obfuscate_api(api_name)}#{user_id or self.client_id}",
         }
+        if self.host_header:
+            headers["Host"] = self.host_header
         response = await self._http_client().post(
             url,
             content=encode_request_payload(payload),

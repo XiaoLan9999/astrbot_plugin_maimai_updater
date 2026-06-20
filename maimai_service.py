@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from importlib import metadata
 from typing import Any
 
 from .official_protocol import (
-    ChimeSessionResolver,
+    DEFAULT_OFFICIAL_TITLE_ENDPOINTS,
     OfficialProtocolError,
     OfficialProtocolUnavailableError,
     OfficialTitleClient,
+    OfficialTitleServerError,
     combo_status_to_fc_name,
     sync_status_to_fs_name,
 )
@@ -125,6 +127,7 @@ class MaimaiService:
         self.official_server_url_index = int(official_server_url_index or 0)
         self.official_keychip_id = (official_keychip_id or "").strip()
         self.official_game_id = (official_game_id or "MAID").strip() or "MAID"
+        self._ffi_fernet_lock = asyncio.Lock()
 
     def _ensure_dependency_versions(self) -> None:
         requirements = (
@@ -268,45 +271,20 @@ class MaimaiService:
         return BindResult()
 
     def _official_configured(self) -> bool:
-        return (
-            self._score_source_wants_official()
-            and bool(self.official_chimelib_dll_path)
-            and bool(self.official_title_base_url)
-        )
+        return self._score_source_wants_official()
 
     def _score_source_mode(self) -> str:
         if self.score_source_mode in SCORE_SOURCE_MODES:
             return self.score_source_mode
         if self.official_protocol_enabled:
             return SCORE_SOURCE_OFFICIAL_ONLY
-        return SCORE_SOURCE_ARCADE
+        return SCORE_SOURCE_OFFICIAL_ONLY
 
     def _score_source_wants_official(self) -> bool:
         return self._score_source_mode() in {
             SCORE_SOURCE_OFFICIAL_ONLY,
             SCORE_SOURCE_OFFICIAL_THEN_ARCADE,
         }
-
-    def _official_resolver(self) -> ChimeSessionResolver:
-        if not self._official_configured():
-            raise OfficialProtocolUnavailableError("official protocol is not configured")
-        return ChimeSessionResolver(
-            dll_path=self.official_chimelib_dll_path,
-            game_id=self.official_game_id,
-            chip_id=self.official_keychip_id,
-            server_url_index=self.official_server_url_index,
-            timeout=self.timeout,
-        )
-
-    def _official_title_client(self) -> OfficialTitleClient:
-        if not self._official_configured():
-            raise OfficialProtocolUnavailableError("official protocol is not configured")
-        return OfficialTitleClient(
-            base_url=self.official_title_base_url,
-            client_id=self.official_client_id or self.official_keychip_id,
-            timeout=self.timeout,
-            http_proxy=self.http_proxy,
-        )
 
     @staticmethod
     def _enum_by_name(enum_cls: Any, name: str | None) -> Any:
@@ -365,7 +343,12 @@ class MaimaiService:
                     achievements=achievement,
                     fc=self._official_fc_type(int(detail.get("comboStatus") or 0)),
                     fs=self._official_fs_type(int(detail.get("syncStatus") or 0)),
-                    dx_score=int(detail.get("deluxscoreMax") or 0),
+                    dx_score=int(
+                        detail.get("deluxscoreMax")
+                        or detail.get("deluxeScoreMax")
+                        or detail.get("dxScore")
+                        or 0
+                    ),
                     dx_rating=None,
                     play_count=int(detail.get("playCount") or 0),
                     play_time=None,
@@ -375,64 +358,129 @@ class MaimaiService:
             )
         return scores
 
-    async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
-        resolver = self._official_resolver()
-        session = await resolver.resolve_async(sgid)
-        title_client = self._official_title_client()
+    @staticmethod
+    def _decode_user_id(value: Any) -> int:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, bytes):
+            value = value.decode("ascii", errors="ignore")
+        text = str(value or "").strip()
+        if text.isdigit():
+            return int(text)
+        return 0
+
+    @staticmethod
+    def _extract_official_rating(value: Any) -> int:
+        if not isinstance(value, dict):
+            return 0
+        for key in ("rating", "playerRating", "totalRating"):
+            try:
+                rating = int(value.get(key) or 0)
+            except (TypeError, ValueError):
+                rating = 0
+            if rating > 0:
+                return rating
+        nested = value.get("userRating")
+        if isinstance(nested, dict):
+            return MaimaiService._extract_official_rating(nested)
+        return 0
+
+    async def _official_user_id_from_sgid(self, sgid: str) -> int:
         try:
-            preview: dict[str, Any] = {}
-            try:
-                preview = await title_client.get_user_preview(session)
-            except Exception as exc:
-                logger.warning(
-                    "[MaimaiUpdater] official preview fetch failed: %s: %s",
-                    exc.__class__.__name__,
-                    exc,
-                    exc_info=True,
-                )
+            from maimai_ffi import arcade as ffi_arcade  # type: ignore
+        except ImportError as exc:
+            raise MaimaiDependencyError("missing maimai-ffi arcade module") from exc
 
-            try:
-                await title_client.user_login(
-                    session,
-                    region_id=self.official_region_id,
-                    place_id=self.official_place_id,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[MaimaiUpdater] official login failed, continuing score fetch: %s: %s",
-                    exc.__class__.__name__,
-                    exc,
-                    exc_info=True,
-                )
+        captured: list[bytes] = []
+        original_fernet = getattr(ffi_arcade, "Fernet", None)
+        if original_fernet is None:
+            raise OfficialProtocolUnavailableError("maimai-ffi arcade Fernet hook is unavailable")
 
-            details = await title_client.get_user_music(session.user_id)
+        class CaptureFernet:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self._inner = original_fernet(*args, **kwargs)
+
+            def encrypt(self, data: bytes) -> bytes:
+                captured.append(data)
+                return self._inner.encrypt(data)
+
+            def decrypt(self, token: bytes) -> bytes:
+                return self._inner.decrypt(token)
+
+        async with self._ffi_fernet_lock:
+            setattr(ffi_arcade, "Fernet", CaptureFernet)
             try:
-                rating_data = await title_client.get_user_rating(session.user_id)
+                encrypted = await ffi_arcade.get_uid_encrypted(str(sgid), http_proxy=self.http_proxy)
+            finally:
+                setattr(ffi_arcade, "Fernet", original_fernet)
+
+        for candidate in [*captured, encrypted]:
+            user_id = self._decode_user_id(candidate)
+            if user_id > 0:
+                return user_id
+        raise OfficialProtocolUnavailableError("official SGID resolver did not expose user_id")
+
+    async def _fetch_official_details_and_rating(self, user_id: int) -> tuple[list[dict[str, Any]], int, str]:
+        last_error: BaseException | None = None
+        for endpoint in DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
+            client = OfficialTitleClient(
+                base_url=endpoint.base_url,
+                client_id="",
+                timeout=self.timeout,
+                http_proxy=self.http_proxy,
+                host_header=endpoint.host_header,
+                verify_tls=endpoint.verify_tls,
+            )
+            try:
+                details = await client.get_user_music(user_id)
+                try:
+                    rating_data = await client.get_user_rating(user_id)
+                except Exception as exc:
+                    logger.warning(
+                        "[MaimaiUpdater] official rating fetch failed via %s: %s: %s",
+                        endpoint.base_url,
+                        exc.__class__.__name__,
+                        exc,
+                        exc_info=True,
+                    )
+                    rating_data = {}
+                logger.info(
+                    "[MaimaiUpdater] official title fetch succeeded via %s host=%s",
+                    endpoint.base_url,
+                    endpoint.host_header or "-",
+                )
+                return details, self._extract_official_rating(rating_data), endpoint.base_url
             except Exception as exc:
+                last_error = exc
                 logger.warning(
-                    "[MaimaiUpdater] official rating fetch failed: %s: %s",
+                    "[MaimaiUpdater] official title fetch failed via %s host=%s: %s: %s",
+                    endpoint.base_url,
+                    endpoint.host_header or "-",
                     exc.__class__.__name__,
                     exc,
                     exc_info=True,
                 )
-                rating_data = {}
-            scores = await self._official_details_to_scores(details)
-            rating = int(rating_data.get("rating") or preview.get("playerRating") or 0)
-            await self.client.updates(
-                self._identifier(credentials=import_token),
-                scores,
-                provider=self._divingfish_provider(),
-            )
-            return SyncResult(
-                player_name=str(preview.get("userName") or ""),
-                rating=rating,
-                score_count=len(scores),
-                player_warning="",
-                marked_score_count=self._count_score_marks(scores),
-                source="official",
-            )
-        finally:
-            await title_client.close()
+            finally:
+                await client.close()
+        raise OfficialTitleServerError("all built-in official title server endpoints failed") from last_error
+
+    async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
+        user_id = await self._official_user_id_from_sgid(sgid)
+        details, rating, _endpoint = await self._fetch_official_details_and_rating(user_id)
+        scores = await self._official_details_to_scores(details)
+        await self.client.updates(
+            self._identifier(credentials=import_token),
+            scores,
+            provider=self._divingfish_provider(),
+        )
+        return SyncResult(
+            player_name="",
+            rating=rating,
+            score_count=len(scores),
+            player_warning="",
+            marked_score_count=self._count_score_marks(scores),
+            source="official",
+        )
 
     async def _sync_arcade_identifier_to_divingfish(
         self,
@@ -503,7 +551,7 @@ class MaimaiService:
             return str(exc)
 
         if isinstance(exc, OfficialProtocolUnavailableError):
-            return "官方完整成绩链路未配置完整：请在插件配置里填写 chimelib_dll.dll 路径和标题服务器 base URL，或把 成绩来源模式 改为 arcade。"
+            return "官方完整成绩链路暂不可用：无法从本次 SGID 获取官方 userId，或内置标题服候选均请求失败。请重新获取二维码后再试。"
 
         if isinstance(exc, OfficialProtocolError):
             return f"官方完整成绩链路失败：{exc}"

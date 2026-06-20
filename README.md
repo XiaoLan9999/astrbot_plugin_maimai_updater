@@ -6,6 +6,13 @@
 
 ## 更新日志
 
+### v0.6.3
+
+- 默认更新链路改为官包确认出的官方完整成绩链路：本次 SGID -> 官方 userId -> `GetUserMusicApi` / `GetUserRatingApi` -> 水鱼导入。
+- 成功时会从官方 `comboStatus` / `syncStatus` 转换并导入 FC、AP、FS、FSD 等特殊标识。
+- 内置 `wq/ai/wi/at.sys-all.cn` 与 `43.137.89.146` Host-header 兜底候选，不在面板暴露 MAI ID、Keychip、placeId、serverURLIndex 等官包内部字段。
+- 仍然不保存 SGID、官方 userId/token 或 MAI 临时会话；每次更新都必须重新提供一次新的 SGID。
+
 ### v0.6.2
 
 - 收敛插件面板配置，移除实验性官包链路的内部参数项，避免用户误以为需要填写或保存 MAI/Keychip/官方临时凭据。
@@ -66,11 +73,12 @@
 1. 用户先绑定自己的水鱼 Import-Token。
 2. 用户每次从官方二维码识别出新的 `SGWCMAID...` 文本。
 3. 用户发送 `更新水鱼 SGWCMAID...`。
-4. 插件立即尝试撤回群聊中的 SGID 消息，然后用本次 SGID 拉取成绩并同步到水鱼。
+4. 插件立即尝试撤回群聊中的 SGID 消息。
+5. 插件用本次 SGID 当场解析官方 userId，然后请求官包确认出的 `Maimai2Servlet/GetUserMusicApi` 与 `GetUserRatingApi` 拉取完整成绩并同步到水鱼。
 
 SGID、MAI 临时会话、官方 userId/token 都是一次性信息。插件不会保存这些内容，也不会要求用户在面板里填写 MAI ID、Keychip ID、placeId、serverURLIndex 等官包内部字段。
 
-我用你提供的 pack 包确认过官包内确实存在 `GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路痕迹。它们会作为后续补齐 FC/FS/AP 的研究依据，但不会暴露成普通用户需要手动填写的配置项。
+我用你提供的 pack 包确认过官包内存在 `GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路。插件现在内置这些接口所需的标题服候选地址，并把官方 `comboStatus` / `syncStatus` 转换为水鱼可识别的 FC/FS/AP 等标识；普通用户不需要手动填写官包内部配置。
 
 ## 安全说明
 
