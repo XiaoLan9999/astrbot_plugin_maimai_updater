@@ -28,6 +28,14 @@ class MaimaiDependencyError(RuntimeError):
 MIN_MAIMAI_PY = (1, 5, 1)
 MIN_MAIMAI_FFI = (0, 7, 0)
 MIN_CN_CURRENT_VERSION_NAME = "MAIMAI_DX_CIRCLE"
+SCORE_SOURCE_ARCADE = "arcade"
+SCORE_SOURCE_OFFICIAL_ONLY = "official_only"
+SCORE_SOURCE_OFFICIAL_THEN_ARCADE = "official_then_arcade"
+SCORE_SOURCE_MODES = {
+    SCORE_SOURCE_ARCADE,
+    SCORE_SOURCE_OFFICIAL_ONLY,
+    SCORE_SOURCE_OFFICIAL_THEN_ARCADE,
+}
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -92,6 +100,7 @@ class MaimaiService:
         *,
         timeout: float = 30.0,
         http_proxy: str = "",
+        score_source_mode: str = "",
         official_protocol_enabled: bool = False,
         official_chimelib_dll_path: str = "",
         official_title_base_url: str = "",
@@ -106,6 +115,7 @@ class MaimaiService:
         self.http_proxy = (http_proxy or "").strip() or None
         self._client: Any | None = None
         self._imports: dict[str, Any] | None = None
+        self.score_source_mode = (score_source_mode or "").strip().lower()
         self.official_protocol_enabled = bool(official_protocol_enabled)
         self.official_chimelib_dll_path = (official_chimelib_dll_path or "").strip()
         self.official_title_base_url = (official_title_base_url or "").strip()
@@ -259,10 +269,23 @@ class MaimaiService:
 
     def _official_configured(self) -> bool:
         return (
-            self.official_protocol_enabled
+            self._score_source_wants_official()
             and bool(self.official_chimelib_dll_path)
             and bool(self.official_title_base_url)
         )
+
+    def _score_source_mode(self) -> str:
+        if self.score_source_mode in SCORE_SOURCE_MODES:
+            return self.score_source_mode
+        if self.official_protocol_enabled:
+            return SCORE_SOURCE_OFFICIAL_ONLY
+        return SCORE_SOURCE_ARCADE
+
+    def _score_source_wants_official(self) -> bool:
+        return self._score_source_mode() in {
+            SCORE_SOURCE_OFFICIAL_ONLY,
+            SCORE_SOURCE_OFFICIAL_THEN_ARCADE,
+        }
 
     def _official_resolver(self) -> ChimeSessionResolver:
         if not self._official_configured():
@@ -442,7 +465,11 @@ class MaimaiService:
         sgid: str,
         import_token: str,
     ) -> SyncResult:
-        if self._official_configured():
+        source_mode = self._score_source_mode()
+        if source_mode == SCORE_SOURCE_OFFICIAL_ONLY:
+            return await self._sync_official_sgid_to_divingfish(sgid, import_token)
+
+        if source_mode == SCORE_SOURCE_OFFICIAL_THEN_ARCADE and self._official_configured():
             return await self._sync_official_sgid_to_divingfish(sgid, import_token)
 
         arcade_identifier, _ = await self._arcade_identifier_from_sgid(sgid)
@@ -476,7 +503,7 @@ class MaimaiService:
             return str(exc)
 
         if isinstance(exc, OfficialProtocolUnavailableError):
-            return "官方完整成绩链路未配置完整：请在插件配置里填写 chimelib_dll.dll 路径和标题服务器 base URL，或关闭官方链路。"
+            return "官方完整成绩链路未配置完整：请在插件配置里填写 chimelib_dll.dll 路径和标题服务器 base URL，或把 成绩来源模式 改为 arcade。"
 
         if isinstance(exc, OfficialProtocolError):
             return f"官方完整成绩链路失败：{exc}"

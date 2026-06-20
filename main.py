@@ -37,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.6.0",
+    "0.6.1",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -55,6 +55,7 @@ class MaimaiUpdaterPlugin(Star):
         self.service = MaimaiService(
             timeout=self._int_config("request_timeout_seconds", 30),
             http_proxy=str(self.config.get("maimai_http_proxy", "") or ""),
+            score_source_mode=str(self.config.get("score_source_mode", "") or ""),
             official_protocol_enabled=self._bool_config("enable_official_protocol", False),
             official_chimelib_dll_path=str(self.config.get("official_chimelib_dll_path", "") or ""),
             official_title_base_url=str(self.config.get("official_title_base_url", "") or ""),
@@ -272,7 +273,7 @@ class MaimaiUpdaterPlugin(Star):
                 update_usage = f"maimaiupdate <SGID> / {self._prefixless_update_example()}"
             return self._message(
                 f"用法：{update_usage}\n"
-                "注意：当前 SGID 机台源暂时无法提供 FULL COMBO/FULL SYNC/AP 标识。"
+                "注意：是否导入 FC/FS/AP 取决于面板里的 成绩来源模式；推荐使用 official_only。"
             )
 
         await self._recall_current_message(event)
@@ -325,6 +326,7 @@ class MaimaiUpdaterPlugin(Star):
         lines = ["📋 maimai 水鱼更新状态"]
         prefix_required = "需要" if self.require_command_prefix else "不需要"
         lines.append(f"唤醒前缀：{prefix_required}")
+        lines.append(f"成绩来源：{self.service._score_source_mode()}")
         if not self.require_command_prefix:
             lines.append(
                 "免前缀用法：水鱼状态 / 水鱼绑定 <Token> / "

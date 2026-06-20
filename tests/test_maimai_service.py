@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from astrbot_plugin_maimai_updater.maimai_service import (
     MaimaiDependencyError,
+    OfficialProtocolUnavailableError,
     MaimaiService,
     _is_version_at_least,
     _patch_maimai_current_version,
@@ -59,8 +60,12 @@ class FakeClient:
 
 
 class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
-    def make_service(self, *, fail_players: bool = False):
-        service = MaimaiService(timeout=1, http_proxy="http://127.0.0.1:7890")
+    def make_service(self, *, fail_players: bool = False, score_source_mode: str = ""):
+        service = MaimaiService(
+            timeout=1,
+            http_proxy="http://127.0.0.1:7890",
+            score_source_mode=score_source_mode,
+        )
         service._imports = {
             "ArcadeProvider": FakeArcadeProvider,
             "DivingFishProvider": FakeDivingFishProvider,
@@ -107,6 +112,34 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identifier.credentials, "import-token")
         self.assertEqual(scores, [])
         self.assertIsInstance(provider, FakeDivingFishProvider)
+
+    async def test_official_only_without_config_does_not_fallback_to_arcade(self):
+        service = self.make_service(score_source_mode="official_only")
+
+        with self.assertRaises(OfficialProtocolUnavailableError):
+            await service.sync_from_sgid_to_divingfish(
+                sgid="SGWCMAID-test",
+                import_token="import-token",
+            )
+
+        self.assertFalse(hasattr(service.client, "qrcode_input"))
+        self.assertIsNone(service.client.updated)
+
+    async def test_official_then_arcade_without_config_uses_arcade_scores(self):
+        service = self.make_service(score_source_mode="official_then_arcade")
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
+            import_token="import-token",
+        )
+
+        self.assertEqual(result.source, "arcade")
+        self.assertEqual(result.score_count, 2)
+        self.assertEqual(service.client.qrcode_input, ("SGWCMAID-test", "http://127.0.0.1:7890"))
+
+    def test_legacy_official_flag_maps_to_official_only(self):
+        service = MaimaiService(official_protocol_enabled=True)
+
+        self.assertEqual(service._score_source_mode(), "official_only")
 
     async def test_describe_dependency_syntax_error(self):
         service = self.make_service()

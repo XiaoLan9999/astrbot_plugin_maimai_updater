@@ -42,17 +42,23 @@
 
 ## 完整成绩链路
 
-默认情况下，插件使用 `maimai-py` 的 ArcadeProvider 更新水鱼。这个公开链路能更新基础成绩和 Rating，但当前不会返回 FC/FS/AP 等特殊标识。
+面板里的 `score_source_mode` 用来选择成绩来源。推荐保持默认的 `official_only`：插件会使用你在面板里配置的官包 `chimelib_dll.dll` 和标题服务器接口，通过一次性 SGID 拉取 `UserMusic/GetUserRating`，再把 FC/FS/AP 等特殊标识一并导入水鱼。
 
-从 `v0.6.0` 开始，插件加入了实验性的“官包接口”链路：
+可选模式：
+
+- `official_only`：只使用官方完整成绩链路。没有填写官包 DLL 或标题服务器 base URL 时会直接报错，不会静默回退到缺少 FC/FS/AP 的基础链路。
+- `official_then_arcade`：未配置官方链路时才使用 maimai-py 基础链路；如果官方链路已经配置但请求失败，不会复用同一条 SGID 强行回退。
+- `arcade`：只使用 maimai-py ArcadeProvider 基础链路。它能更新基础成绩和 Rating，但不会返回 FC/FS/AP 等特殊标识。
+
+从 `v0.6.1` 开始，官方完整成绩链路会执行这些步骤：
 
 1. 用官包 `ChimeLib.NET/chimelib_dll.dll` 的 `CCommGetUserData` 逻辑把一次性 SGID 换成本次 `userId + token`。
 2. 按官包 `Assembly-CSharp.dll` 中的标题服协议请求 `GetUserPreviewApi`、`UserLoginApi`、`GetUserMusicApi`、`GetUserRatingApi`。
 3. 将 `UserMusicDetail.comboStatus/syncStatus` 映射为水鱼可识别的 FC/FCP/AP/APP 与 SYNC/FS/FSP/FSD/FSDP，再导入水鱼。
 
-这个链路默认关闭。要启用，需要在插件配置里填写：
+要使用官方完整成绩链路，需要在插件配置里填写：
 
-- `enable_official_protocol`: 开启。
+- `score_source_mode`: 推荐 `official_only`。
 - `official_chimelib_dll_path`: 官包中的 `Package\Sinmai_Data\Plugins\chimelib_dll.dll` 绝对路径。
 - `official_title_base_url`: 标题服务器完整 base URL，通常是 AllNet 返回的 `GameServerUri`，应以 `/` 结尾。
 - `official_keychip_id`: Keychip ID，例如官包 `segatools.ini` 里的 `A63E-01E11890000`。
@@ -61,9 +67,9 @@
 - `official_place_id`: 不确定时先填 `0`，按实测日志调整。
 - `official_server_url_index`: 默认 `0`。
 
-插件不会自带、上传或重新分发官包 DLL，也不会执行游戏主程序。开启后只会在收到用户 SGID 时调用配置的 `chimelib_dll.dll` 解析本次会话。
+`enable_official_protocol` 是旧版配置兼容项。新安装或新调整时优先使用 `score_source_mode`。
 
-如果未开启官方链路或配置不完整，插件会继续使用 maimai-py 基础成绩链路。
+插件不会自带、上传或重新分发官包 DLL，也不会执行游戏主程序。开启官方完整成绩链路后，只会在收到用户 SGID 时调用你配置的 `chimelib_dll.dll` 解析本次会话。
 
 ## 安全说明
 
@@ -84,7 +90,7 @@
 - Python 需要满足 `maimai-py` 的要求，当前依赖版本要求 Python `>=3.9,<4.0`。
 - `requirements.txt` 固定 `maimai-py==1.5.1`，并显式依赖 `httpx` 与 `cryptography`。
 - `maimai-py==1.5.1` 依赖 `maimai-ffi==0.7.0`。
-- 官方完整成绩链路的 `chimelib_dll.dll` 调用仅适用于 Windows x64 环境；其它系统请保持 `enable_official_protocol=false`。
+- 官方完整成绩链路的 `chimelib_dll.dll` 调用仅适用于 Windows x64 环境；其它系统请将 `score_source_mode` 设为 `arcade`。
 
 ## 数据
 
@@ -132,7 +138,7 @@ python -m pip install --no-cache-dir "maimai-py==1.5.1" "httpx>=0.28.0,<0.29.0" 
 
 4. 重新启动 AstrBot，再安装或重载插件。
 
-如果开启官方完整链路后仍没有 FC/FS/AP，请检查：
+如果选择 `official_only` 后仍没有 FC/FS/AP，请检查：
 
 - `official_chimelib_dll_path` 是否指向真实存在的 `chimelib_dll.dll`。
 - `official_title_base_url` 是否是当前可用标题服务器 base URL。

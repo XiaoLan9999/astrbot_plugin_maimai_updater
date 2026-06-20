@@ -1,4 +1,15 @@
 {
+  "score_source_mode": {
+    "description": "成绩来源模式",
+    "hint": "官方完整成绩可保留 FC/FS/AP；maimai-py 基础链路不会提供 FC/FS/AP。选择 official_only 前请填写 chimelib_dll.dll 和标题服务器 base URL。",
+    "type": "string",
+    "options": [
+      "official_only",
+      "official_then_arcade",
+      "arcade"
+    ],
+    "default": "official_only"
+  },
   "require_command_prefix": {
     "description": "需要唤醒前缀",
     "hint": "开启后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件所有命令都可以直接发送，例如 水鱼状态、水鱼绑定 <Token>、绑定水鱼 <Token>、更新水鱼 SGWCMAID...。裸 SGID 仍不会触发。",
@@ -12,8 +23,8 @@
     "default": true
   },
   "enable_official_protocol": {
-    "description": "启用官方完整成绩链路",
-    "hint": "实验功能。开启后会优先按官包接口解析 SGID 并拉取 UserMusic/GetUserRating，理论上可补齐 FC/FS/AP 等特殊标识。需要同时填写 chimelib_dll.dll 路径和标题服务器 base URL。关闭时仍使用 maimai-py 机台基础成绩链路。",
+    "description": "旧版官方链路开关（兼容）",
+    "hint": "兼容旧版本配置。新安装请使用上方 成绩来源模式。未设置成绩来源模式时，开启等同 official_only；关闭等同 arcade。",
     "type": "bool",
     "default": false
   },
