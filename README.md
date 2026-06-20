@@ -4,6 +4,29 @@
 
 ![maimai 水鱼更新流程](assets/maimai-updater-flow.png)
 
+
+## 更新日志
+
+### v0.6.1
+
+- 新增面板配置 `score_source_mode`，可选择 `official_only`、`official_then_arcade`、`arcade`。
+- 默认使用 `official_only`，未配置官包 DLL 或标题服务器 base URL 时直接提示配置缺失，不再静默回退到缺少 FC/FS/AP 的基础链路。
+- `/水鱼状态` 会显示当前成绩来源模式。
+- 更新 README 中的官方完整成绩链路说明。
+
+### v0.6.0
+
+- 加入实验性官包接口链路，尝试通过一次性 SGID 拉取 `UserMusic/GetUserRating`。
+- 将 `comboStatus/syncStatus` 映射为水鱼可识别的 FC/FCP/AP/APP 与 SYNC/FS/FSP/FSD/FSDP。
+
+### v0.5.2
+
+- 修复 MAIMAI2026 新版本下 Rating 仍按旧版本拆分的问题。
+
+### v0.5.1
+
+- 修复关闭唤醒前缀后，中文免前缀命令未完整触发的问题。
+
 ## 功能
 
 - `maimaitoken <Import-Token>` / `水鱼绑定 <Import-Token>` / `绑定水鱼 <Import-Token>`：保存用户自己的水鱼 Import-Token。
