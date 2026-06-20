@@ -1,15 +1,4 @@
 {
-  "score_source_mode": {
-    "description": "成绩来源模式",
-    "hint": "官方完整成绩可保留 FC/FS/AP；maimai-py 基础链路不会提供 FC/FS/AP。选择 official_only 前请填写 chimelib_dll.dll 和标题服务器 base URL。",
-    "type": "string",
-    "options": [
-      "official_only",
-      "official_then_arcade",
-      "arcade"
-    ],
-    "default": "official_only"
-  },
   "require_command_prefix": {
     "description": "需要唤醒前缀",
     "hint": "开启后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件所有命令都可以直接发送，例如 水鱼状态、水鱼绑定 <Token>、绑定水鱼 <Token>、更新水鱼 SGWCMAID...。裸 SGID 仍不会触发。",
@@ -18,67 +7,13 @@
   },
   "enable_clear_command": {
     "description": "启用清空水鱼命令",
-    "hint": "启用后可使用 maimaiclear 确认清空 向水鱼发送清空成绩请求，用于误用他人 SGID 导致成绩污染后的手动处理。",
+    "hint": "启用后可使用 maimaiclear 确认清空 / 清空水鱼 确认清空 / 清空b50 确认清空 向水鱼发送清空成绩请求，用于误用他人 SGID 导致成绩污染后的手动处理。",
     "type": "bool",
     "default": true
   },
-  "enable_official_protocol": {
-    "description": "旧版官方链路开关（兼容）",
-    "hint": "兼容旧版本配置。新安装请使用上方 成绩来源模式。未设置成绩来源模式时，开启等同 official_only；关闭等同 arcade。",
-    "type": "bool",
-    "default": false
-  },
-  "official_chimelib_dll_path": {
-    "description": "chimelib_dll.dll 路径",
-    "hint": "从官包中提取 Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 后填写绝对路径。插件不会自带该 DLL，也不会保存 SGID。",
-    "type": "string",
-    "default": ""
-  },
-  "official_title_base_url": {
-    "description": "标题服务器 base URL",
-    "hint": "官服标题服务器完整 base URL，应以 / 结尾，通常是 AllNet 返回的 GameServerUri。示例格式：https://example/Maimai2Servlet/。留空则不启用官方完整成绩链路。",
-    "type": "string",
-    "default": ""
-  },
-  "official_client_id": {
-    "description": "官方 clientId",
-    "hint": "UserPreview/UserLogin 请求中的 clientId。留空时会使用 official_keychip_id。",
-    "type": "string",
-    "default": ""
-  },
-  "official_keychip_id": {
-    "description": "Keychip ID",
-    "hint": "传给 chimelib_dll 的 chipId，也可作为 clientId 兜底。例如官包 segatools.ini 中的 A63E-01E11890000。",
-    "type": "string",
-    "default": ""
-  },
-  "official_region_id": {
-    "description": "官方 regionId",
-    "hint": "UserLogin 请求中的 regionId。中国大陆通常为 8。",
-    "type": "int",
-    "default": 8
-  },
-  "official_place_id": {
-    "description": "官方 placeId",
-    "hint": "UserLogin 请求中的 placeId。如果不知道可先留 0，后续按实测日志调整。",
-    "type": "int",
-    "default": 0
-  },
-  "official_server_url_index": {
-    "description": "Aime serverURLIndex",
-    "hint": "传给 chimelib_dll 的 serverURLIndex。默认 0；如果官包/网络环境需要其它索引，可在这里调整。",
-    "type": "int",
-    "default": 0
-  },
-  "official_game_id": {
-    "description": "官方二维码 gameId",
-    "hint": "SGWC 后面的游戏 ID，舞萌 DX 为 MAID。一般不要修改。",
-    "type": "string",
-    "default": "MAID"
-  },
   "sgid_max_age_seconds": {
     "description": "SGID 最大有效时间",
-    "hint": "根据 SGID 内嵌时间戳判断是否过期。超过该秒数会拒绝使用，避免复用旧二维码导致成绩异常。",
+    "hint": "根据 SGID 内嵌时间戳判断是否过期。超过该秒数会拒绝使用，避免复用旧二维码导致失败或影响玩家正常登录。",
     "type": "int",
     "slider": {
       "min": 60,
@@ -89,7 +24,7 @@
   },
   "request_timeout_seconds": {
     "description": "网络请求超时时间",
-    "hint": "请求舞萌机台/官方标题服务和水鱼接口的超时时间。",
+    "hint": "请求舞萌机台数据源和水鱼接口的超时时间。",
     "type": "int",
     "slider": {
       "min": 5,
@@ -106,7 +41,7 @@
   },
   "kook_token": {
     "description": "KOOK Bot Token",
-    "hint": "用于群聊撤回含 SGID/水鱼 Token 的消息。留空时会尝试从 KOOK 平台配置读取。",
+    "hint": "用于群聊撤回包含 SGID/水鱼 Token 的消息。留空时会尝试从 KOOK 平台配置读取。",
     "type": "string",
     "default": ""
   },

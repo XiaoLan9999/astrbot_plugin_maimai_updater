@@ -1,27 +1,23 @@
 # AstrBot maimai 水鱼更新器
 
-这是一个独立的 AstrBot 插件，用一次性的舞萌 DX 官方二维码识别文本 `SGWCMAID/SGID`，把官方成绩同步到水鱼查分器。
+这是一个独立的 AstrBot 插件，用一次性的舞萌 DX 官方二维码识别文本 `SGWCMAID/SGID`，把成绩同步到水鱼查分器。
 
 ![maimai 水鱼更新流程](assets/maimai-updater-flow.png)
 
-
 ## 更新日志
+
+### v0.6.2
+
+- 收敛插件面板配置，移除实验性官包链路的内部参数项，避免用户误以为需要填写或保存 MAI/Keychip/官方临时凭据。
+- 保持原有使用方式：绑定水鱼 Import-Token 后，每次通过 `更新水鱼 SGWCMAID...` 提供一次性 SGID 更新。
+- 明确说明插件不会保存 SGID、MAI 临时会话、官方 userId/token 或旧版 `arcade_credentials`。
+- pack 包仅用于确认官包链路和后续优化方向，不作为普通用户运行时配置项。
 
 ### v0.6.1
 
-- 新增面板配置 `score_source_mode`，可选择 `official_only`、`official_then_arcade`、`arcade`。
-- 默认使用 `official_only`，未配置官包 DLL 或标题服务器 base URL 时直接提示配置缺失，不再静默回退到缺少 FC/FS/AP 的基础链路。
-- `/水鱼状态` 会显示当前成绩来源模式。
-- 更新 README 中的官方完整成绩链路说明。
-
-### v0.6.0
-
-- 加入实验性官包接口链路，尝试通过一次性 SGID 拉取 `UserMusic/GetUserRating`。
-- 将 `comboStatus/syncStatus` 映射为水鱼可识别的 FC/FCP/AP/APP 与 SYNC/FS/FSP/FSD/FSDP。
-
-### v0.5.2
-
-- 修复 MAIMAI2026 新版本下 Rating 仍按旧版本拆分的问题。
+- 更新到 `maimai-py==1.5.1` / `maimai-ffi==0.7.0`。
+- 修正 MAIMAI2026 新版本下 Rating 仍按旧版本拆分的问题。
+- 保留一次性 SGID 更新语义，不恢复 `maimai_bind` 长期绑定流程。
 
 ### v0.5.1
 
@@ -35,7 +31,7 @@
 - `maimaistatus` / `水鱼状态`：查看 token 绑定状态、最近同步结果和当前命令触发方式。
 - `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地展示状态。
 
-插件不再提供 `maimai_bind`。官方 SGID 只适合一次性使用，每次更新都需要用户重新提供新的二维码识别文本。
+插件不提供 `maimai_bind`。官方 SGID 只适合一次性使用，每次更新都需要用户重新提供新的二维码识别文本。
 
 ## 命令触发
 
@@ -63,48 +59,26 @@
 
 关闭该开关只影响本插件命令，不会让裸 `SGWCMAID...` 自动更新。
 
-## 完整成绩链路
+## 数据链路说明
 
-面板里的 `score_source_mode` 用来选择成绩来源。推荐保持默认的 `official_only`：插件会使用你在面板里配置的官包 `chimelib_dll.dll` 和标题服务器接口，通过一次性 SGID 拉取 `UserMusic/GetUserRating`，再把 FC/FS/AP 等特殊标识一并导入水鱼。
+当前正式功能保持简单稳定：
 
-可选模式：
+1. 用户先绑定自己的水鱼 Import-Token。
+2. 用户每次从官方二维码识别出新的 `SGWCMAID...` 文本。
+3. 用户发送 `更新水鱼 SGWCMAID...`。
+4. 插件立即尝试撤回群聊中的 SGID 消息，然后用本次 SGID 拉取成绩并同步到水鱼。
 
-- `official_only`：只使用官方完整成绩链路。没有填写官包 DLL 或标题服务器 base URL 时会直接报错，不会静默回退到缺少 FC/FS/AP 的基础链路。
-- `official_then_arcade`：未配置官方链路时才使用 maimai-py 基础链路；如果官方链路已经配置但请求失败，不会复用同一条 SGID 强行回退。
-- `arcade`：只使用 maimai-py ArcadeProvider 基础链路。它能更新基础成绩和 Rating，但不会返回 FC/FS/AP 等特殊标识。
+SGID、MAI 临时会话、官方 userId/token 都是一次性信息。插件不会保存这些内容，也不会要求用户在面板里填写 MAI ID、Keychip ID、placeId、serverURLIndex 等官包内部字段。
 
-从 `v0.6.1` 开始，官方完整成绩链路会执行这些步骤：
-
-1. 用官包 `ChimeLib.NET/chimelib_dll.dll` 的 `CCommGetUserData` 逻辑把一次性 SGID 换成本次 `userId + token`。
-2. 按官包 `Assembly-CSharp.dll` 中的标题服协议请求 `GetUserPreviewApi`、`UserLoginApi`、`GetUserMusicApi`、`GetUserRatingApi`。
-3. 将 `UserMusicDetail.comboStatus/syncStatus` 映射为水鱼可识别的 FC/FCP/AP/APP 与 SYNC/FS/FSP/FSD/FSDP，再导入水鱼。
-
-要使用官方完整成绩链路，需要在插件配置里填写：
-
-- `score_source_mode`: 推荐 `official_only`。
-- `official_chimelib_dll_path`: 官包中的 `Package\Sinmai_Data\Plugins\chimelib_dll.dll` 绝对路径。
-- `official_title_base_url`: 标题服务器完整 base URL，通常是 AllNet 返回的 `GameServerUri`，应以 `/` 结尾。
-- `official_keychip_id`: Keychip ID，例如官包 `segatools.ini` 里的 `A63E-01E11890000`。
-- `official_client_id`: 可留空，留空时使用 `official_keychip_id`。
-- `official_region_id`: 中国大陆通常为 `8`。
-- `official_place_id`: 不确定时先填 `0`，按实测日志调整。
-- `official_server_url_index`: 默认 `0`。
-
-`enable_official_protocol` 是旧版配置兼容项。新安装或新调整时优先使用 `score_source_mode`。
-
-插件不会自带、上传或重新分发官包 DLL，也不会执行游戏主程序。开启官方完整成绩链路后，只会在收到用户 SGID 时调用你配置的 `chimelib_dll.dll` 解析本次会话。
+我用你提供的 pack 包确认过官包内确实存在 `GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路痕迹。它们会作为后续补齐 FC/FS/AP 的研究依据，但不会暴露成普通用户需要手动填写的配置项。
 
 ## 安全说明
 
 舞萌官方二维码识别出的 SGID，以及由它解析出的本次临时会话，都不适合长期保存。复用旧 SGID 可能失败，也可能影响玩家正常登录。
 
-因此插件只持久化水鱼 Import-Token 和展示状态，不持久化 SGID，也不持久化旧版使用过的 `arcade_credentials`。插件会校验 SGID 内嵌时间戳，默认只接受 180 秒内生成的 SGID；同一条 SGID 在插件进程内也只允许使用一次。
+因此插件只持久化水鱼 Import-Token 和展示状态，不持久化 SGID，也不持久化旧版本使用过的 `arcade_credentials`。插件会校验 SGID 内嵌时间戳，默认只接受 180 秒内生成的 SGID；同一条 SGID 在插件进程内也只允许使用一次。
 
 群聊中收到 SGID 或 Token 后，插件会尝试撤回原消息，并单独发送“已尝试撤回消息，如果没撤回请手动撤回”的安全提示。私聊不会撤回。
-
-## 玩家名说明
-
-默认 maimai-py 基础链路不会从水鱼反查玩家名，也不会在更新结果里展示玩家名。开启官方完整链路后，如果 `GetUserPreviewApi` 成功返回玩家名，插件只在内部结果中保留本次返回值；当前更新完成提示仍以 Rating、成绩数、特殊标识数量为主，避免在群聊暴露身份信息。
 
 ## 运行环境
 
@@ -113,11 +87,10 @@
 - Python 需要满足 `maimai-py` 的要求，当前依赖版本要求 Python `>=3.9,<4.0`。
 - `requirements.txt` 固定 `maimai-py==1.5.1`，并显式依赖 `httpx` 与 `cryptography`。
 - `maimai-py==1.5.1` 依赖 `maimai-ffi==0.7.0`。
-- 官方完整成绩链路的 `chimelib_dll.dll` 调用仅适用于 Windows x64 环境；其它系统请将 `score_source_mode` 设为 `arcade`。
 
 ## 数据
 
-插件数据保存到 AstrBot 标准插件数据目录下的 `users.json`，明文保存。日志不会输出完整 SGID、Import-Token 或官方临时会话。
+插件数据保存到 AstrBot 标准插件数据目录下的 `users.json`，明文保存。日志不会输出完整 SGID 或 Import-Token。
 
 `users.json` 只保存：
 
@@ -161,11 +134,4 @@ python -m pip install --no-cache-dir "maimai-py==1.5.1" "httpx>=0.28.0,<0.29.0" 
 
 4. 重新启动 AstrBot，再安装或重载插件。
 
-如果选择 `official_only` 后仍没有 FC/FS/AP，请检查：
-
-- `official_chimelib_dll_path` 是否指向真实存在的 `chimelib_dll.dll`。
-- `official_title_base_url` 是否是当前可用标题服务器 base URL。
-- Bot 所在机器是否能访问标题服务器。
-- 日志里是否有 `official chime session failed` 或 `official title API ... failed`。
-
-如果群聊敏感消息撤回失败，请检查 Bot 是否有撤回/管理消息权限。插件只会记录一行撤回失败原因，不会输出完整 SGID 或 Token。
+如果群聊敏感消息撤回失败，请检查 Bot 是否拥有撤回/管理消息权限。插件只会记录一行撤回失败原因，不会输出完整 SGID 或 Token。
