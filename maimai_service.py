@@ -4,6 +4,15 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any
 
+from .official_protocol import (
+    ChimeSessionResolver,
+    OfficialProtocolError,
+    OfficialProtocolUnavailableError,
+    OfficialTitleClient,
+    combo_status_to_fc_name,
+    sync_status_to_fs_name,
+)
+
 try:
     from astrbot.api import logger
 except ModuleNotFoundError:  # pragma: no cover - local tests without AstrBot installed.
@@ -78,11 +87,34 @@ class SyncResult:
 
 
 class MaimaiService:
-    def __init__(self, *, timeout: float = 30.0, http_proxy: str = ""):
+    def __init__(
+        self,
+        *,
+        timeout: float = 30.0,
+        http_proxy: str = "",
+        official_protocol_enabled: bool = False,
+        official_chimelib_dll_path: str = "",
+        official_title_base_url: str = "",
+        official_client_id: str = "",
+        official_region_id: int = 8,
+        official_place_id: int = 0,
+        official_server_url_index: int = 0,
+        official_keychip_id: str = "",
+        official_game_id: str = "MAID",
+    ):
         self.timeout = float(timeout or 30.0)
         self.http_proxy = (http_proxy or "").strip() or None
         self._client: Any | None = None
         self._imports: dict[str, Any] | None = None
+        self.official_protocol_enabled = bool(official_protocol_enabled)
+        self.official_chimelib_dll_path = (official_chimelib_dll_path or "").strip()
+        self.official_title_base_url = (official_title_base_url or "").strip()
+        self.official_client_id = (official_client_id or "").strip()
+        self.official_region_id = int(official_region_id or 8)
+        self.official_place_id = int(official_place_id or 0)
+        self.official_server_url_index = int(official_server_url_index or 0)
+        self.official_keychip_id = (official_keychip_id or "").strip()
+        self.official_game_id = (official_game_id or "MAID").strip() or "MAID"
 
     def _ensure_dependency_versions(self) -> None:
         requirements = (
@@ -126,6 +158,8 @@ class MaimaiService:
             from maimai_py import exceptions as maimai_exceptions  # type: ignore
             from maimai_py import enums as maimai_enums  # type: ignore
             from maimai_py import maimai as maimai_core  # type: ignore
+            from maimai_py.enums import FCType, FSType, LevelIndex, RateType, SongType  # type: ignore
+            from maimai_py.models import Score  # type: ignore
             import httpx
         except SyntaxError as exc:
             raise MaimaiDependencyError(
@@ -148,6 +182,12 @@ class MaimaiService:
             "DivingFishProvider": DivingFishProvider,
             "MaimaiClient": MaimaiClient,
             "PlayerIdentifier": PlayerIdentifier,
+            "Score": Score,
+            "FCType": FCType,
+            "FSType": FSType,
+            "LevelIndex": LevelIndex,
+            "RateType": RateType,
+            "SongType": SongType,
             "AimeServerError": getattr(maimai_exceptions, "AimeServerError", None),
             "ArcadeError": getattr(maimai_exceptions, "ArcadeError", None),
             "ArcadeIdentifierError": getattr(maimai_exceptions, "ArcadeIdentifierError", None),
@@ -217,6 +257,160 @@ class MaimaiService:
         await self._arcade_identifier_from_sgid(sgid)
         return BindResult()
 
+    def _official_configured(self) -> bool:
+        return (
+            self.official_protocol_enabled
+            and bool(self.official_chimelib_dll_path)
+            and bool(self.official_title_base_url)
+        )
+
+    def _official_resolver(self) -> ChimeSessionResolver:
+        if not self._official_configured():
+            raise OfficialProtocolUnavailableError("official protocol is not configured")
+        return ChimeSessionResolver(
+            dll_path=self.official_chimelib_dll_path,
+            game_id=self.official_game_id,
+            chip_id=self.official_keychip_id,
+            server_url_index=self.official_server_url_index,
+            timeout=self.timeout,
+        )
+
+    def _official_title_client(self) -> OfficialTitleClient:
+        if not self._official_configured():
+            raise OfficialProtocolUnavailableError("official protocol is not configured")
+        return OfficialTitleClient(
+            base_url=self.official_title_base_url,
+            client_id=self.official_client_id or self.official_keychip_id,
+            timeout=self.timeout,
+            http_proxy=self.http_proxy,
+        )
+
+    @staticmethod
+    def _enum_by_name(enum_cls: Any, name: str | None) -> Any:
+        if not name:
+            return None
+        members = getattr(enum_cls, "__members__", {})
+        return members.get(name)
+
+    def _official_fc_type(self, combo_status: int) -> Any:
+        return self._enum_by_name(self._load_imports()["FCType"], combo_status_to_fc_name(combo_status))
+
+    def _official_fs_type(self, sync_status: int) -> Any:
+        return self._enum_by_name(self._load_imports()["FSType"], sync_status_to_fs_name(sync_status))
+
+    def _official_level_index(self, music_id: int, level: int) -> Any:
+        imports = self._load_imports()
+        song_type = imports["SongType"]._from_id(music_id)
+        if song_type == imports["SongType"].UTAGE:
+            return music_id
+        return imports["LevelIndex"](int(level or 0))
+
+    async def _song_level_text(self, songs: Any, music_id: int, song_type: Any, level_index: Any) -> str:
+        try:
+            song = await songs.by_id(music_id % 10000)
+            if not song:
+                return ""
+            difficulty = song.get_difficulty(song_type, level_index)
+            return str(getattr(difficulty, "level", "") or "")
+        except Exception:
+            return ""
+
+    async def _official_details_to_scores(self, details: list[dict[str, Any]]) -> list[Any]:
+        imports = self._load_imports()
+        Score = imports["Score"]
+        RateType = imports["RateType"]
+        SongType = imports["SongType"]
+        try:
+            songs = await self.client.songs(alias_provider=None)
+        except TypeError:
+            songs = await self.client.songs()
+
+        scores: list[Any] = []
+        for detail in details:
+            music_id = int(detail.get("musicId") or 0)
+            if music_id <= 0:
+                continue
+            song_type = SongType._from_id(music_id)
+            level_index = self._official_level_index(music_id, int(detail.get("level") or 0))
+            achievement = float(detail.get("achievement") or 0) / 10000
+            score_id = music_id if song_type == SongType.UTAGE else music_id % 10000
+            scores.append(
+                Score(
+                    id=score_id,
+                    level=await self._song_level_text(songs, music_id, song_type, level_index),
+                    level_index=level_index,
+                    achievements=achievement,
+                    fc=self._official_fc_type(int(detail.get("comboStatus") or 0)),
+                    fs=self._official_fs_type(int(detail.get("syncStatus") or 0)),
+                    dx_score=int(detail.get("deluxscoreMax") or 0),
+                    dx_rating=None,
+                    play_count=int(detail.get("playCount") or 0),
+                    play_time=None,
+                    rate=RateType._from_achievement(achievement),
+                    type=song_type,
+                )
+            )
+        return scores
+
+    async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
+        resolver = self._official_resolver()
+        session = await resolver.resolve_async(sgid)
+        title_client = self._official_title_client()
+        try:
+            preview: dict[str, Any] = {}
+            try:
+                preview = await title_client.get_user_preview(session)
+            except Exception as exc:
+                logger.warning(
+                    "[MaimaiUpdater] official preview fetch failed: %s: %s",
+                    exc.__class__.__name__,
+                    exc,
+                    exc_info=True,
+                )
+
+            try:
+                await title_client.user_login(
+                    session,
+                    region_id=self.official_region_id,
+                    place_id=self.official_place_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[MaimaiUpdater] official login failed, continuing score fetch: %s: %s",
+                    exc.__class__.__name__,
+                    exc,
+                    exc_info=True,
+                )
+
+            details = await title_client.get_user_music(session.user_id)
+            try:
+                rating_data = await title_client.get_user_rating(session.user_id)
+            except Exception as exc:
+                logger.warning(
+                    "[MaimaiUpdater] official rating fetch failed: %s: %s",
+                    exc.__class__.__name__,
+                    exc,
+                    exc_info=True,
+                )
+                rating_data = {}
+            scores = await self._official_details_to_scores(details)
+            rating = int(rating_data.get("rating") or preview.get("playerRating") or 0)
+            await self.client.updates(
+                self._identifier(credentials=import_token),
+                scores,
+                provider=self._divingfish_provider(),
+            )
+            return SyncResult(
+                player_name=str(preview.get("userName") or ""),
+                rating=rating,
+                score_count=len(scores),
+                player_warning="",
+                marked_score_count=self._count_score_marks(scores),
+                source="official",
+            )
+        finally:
+            await title_client.close()
+
     async def _sync_arcade_identifier_to_divingfish(
         self,
         arcade_identifier: Any,
@@ -248,6 +442,9 @@ class MaimaiService:
         sgid: str,
         import_token: str,
     ) -> SyncResult:
+        if self._official_configured():
+            return await self._sync_official_sgid_to_divingfish(sgid, import_token)
+
         arcade_identifier, _ = await self._arcade_identifier_from_sgid(sgid)
         return await self._sync_arcade_identifier_to_divingfish(
             arcade_identifier,
@@ -277,6 +474,12 @@ class MaimaiService:
                 file_name = root.filename or "未知文件"
                 return f"{exc} 原始错误：SyntaxError: {root.msg} ({file_name}, line {root.lineno})"
             return str(exc)
+
+        if isinstance(exc, OfficialProtocolUnavailableError):
+            return "官方完整成绩链路未配置完整：请在插件配置里填写 chimelib_dll.dll 路径和标题服务器 base URL，或关闭官方链路。"
+
+        if isinstance(exc, OfficialProtocolError):
+            return f"官方完整成绩链路失败：{exc}"
 
         imports = self._imports or {}
         checks = (

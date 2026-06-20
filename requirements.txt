@@ -1,2 +1,3 @@
 maimai-py==1.5.1
 httpx>=0.28.0,<0.29.0
+cryptography>=38.0

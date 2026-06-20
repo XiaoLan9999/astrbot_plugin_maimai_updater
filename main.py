@@ -37,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.5.2",
+    "0.6.0",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -55,6 +55,15 @@ class MaimaiUpdaterPlugin(Star):
         self.service = MaimaiService(
             timeout=self._int_config("request_timeout_seconds", 30),
             http_proxy=str(self.config.get("maimai_http_proxy", "") or ""),
+            official_protocol_enabled=self._bool_config("enable_official_protocol", False),
+            official_chimelib_dll_path=str(self.config.get("official_chimelib_dll_path", "") or ""),
+            official_title_base_url=str(self.config.get("official_title_base_url", "") or ""),
+            official_client_id=str(self.config.get("official_client_id", "") or ""),
+            official_region_id=self._int_config("official_region_id", 8),
+            official_place_id=self._int_config("official_place_id", 0),
+            official_server_url_index=self._int_config("official_server_url_index", 0),
+            official_keychip_id=str(self.config.get("official_keychip_id", "") or ""),
+            official_game_id=str(self.config.get("official_game_id", "MAID") or "MAID"),
         )
         self.recaller = MessageRecaller(
             context,

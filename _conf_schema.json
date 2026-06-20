@@ -11,6 +11,60 @@
     "type": "bool",
     "default": true
   },
+  "enable_official_protocol": {
+    "description": "启用官方完整成绩链路",
+    "hint": "实验功能。开启后会优先按官包接口解析 SGID 并拉取 UserMusic/GetUserRating，理论上可补齐 FC/FS/AP 等特殊标识。需要同时填写 chimelib_dll.dll 路径和标题服务器 base URL。关闭时仍使用 maimai-py 机台基础成绩链路。",
+    "type": "bool",
+    "default": false
+  },
+  "official_chimelib_dll_path": {
+    "description": "chimelib_dll.dll 路径",
+    "hint": "从官包中提取 Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 后填写绝对路径。插件不会自带该 DLL，也不会保存 SGID。",
+    "type": "string",
+    "default": ""
+  },
+  "official_title_base_url": {
+    "description": "标题服务器 base URL",
+    "hint": "官服标题服务器完整 base URL，应以 / 结尾，通常是 AllNet 返回的 GameServerUri。示例格式：https://example/Maimai2Servlet/。留空则不启用官方完整成绩链路。",
+    "type": "string",
+    "default": ""
+  },
+  "official_client_id": {
+    "description": "官方 clientId",
+    "hint": "UserPreview/UserLogin 请求中的 clientId。留空时会使用 official_keychip_id。",
+    "type": "string",
+    "default": ""
+  },
+  "official_keychip_id": {
+    "description": "Keychip ID",
+    "hint": "传给 chimelib_dll 的 chipId，也可作为 clientId 兜底。例如官包 segatools.ini 中的 A63E-01E11890000。",
+    "type": "string",
+    "default": ""
+  },
+  "official_region_id": {
+    "description": "官方 regionId",
+    "hint": "UserLogin 请求中的 regionId。中国大陆通常为 8。",
+    "type": "int",
+    "default": 8
+  },
+  "official_place_id": {
+    "description": "官方 placeId",
+    "hint": "UserLogin 请求中的 placeId。如果不知道可先留 0，后续按实测日志调整。",
+    "type": "int",
+    "default": 0
+  },
+  "official_server_url_index": {
+    "description": "Aime serverURLIndex",
+    "hint": "传给 chimelib_dll 的 serverURLIndex。默认 0；如果官包/网络环境需要其它索引，可在这里调整。",
+    "type": "int",
+    "default": 0
+  },
+  "official_game_id": {
+    "description": "官方二维码 gameId",
+    "hint": "SGWC 后面的游戏 ID，舞萌 DX 为 MAID。一般不要修改。",
+    "type": "string",
+    "default": "MAID"
+  },
   "sgid_max_age_seconds": {
     "description": "SGID 最大有效时间",
     "hint": "根据 SGID 内嵌时间戳判断是否过期。超过该秒数会拒绝使用，避免复用旧二维码导致成绩异常。",
@@ -24,7 +78,7 @@
   },
   "request_timeout_seconds": {
     "description": "网络请求超时时间",
-    "hint": "请求舞萌机台服务和水鱼接口的超时时间。",
+    "hint": "请求舞萌机台/官方标题服务和水鱼接口的超时时间。",
     "type": "int",
     "slider": {
       "min": 5,
