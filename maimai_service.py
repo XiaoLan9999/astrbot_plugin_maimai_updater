@@ -244,6 +244,7 @@ class MaimaiService:
     def _chimelib_candidates(self) -> list[Path]:
         plugin_dir = Path(__file__).resolve().parent
         candidates = [
+            plugin_dir / "_resources" / "core.dat",
             plugin_dir / "chimelib_dll.dll",
             plugin_dir / "bin" / "chimelib_dll.dll",
         ]

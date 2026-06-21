@@ -135,6 +135,15 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         service._client = FakeClient(fail_players=fail_players)
         return service
 
+
+    def test_builtin_official_resource_is_discovered(self):
+        service = MaimaiService()
+        path = service._find_chimelib_dll_path()
+
+        self.assertIsNotNone(path)
+        self.assertEqual(path.name, "core.dat")
+        self.assertTrue(path.is_file())
+
     async def test_bind_from_sgid_only_validates_qrcode(self):
         service = self.make_service()
         result = await service.bind_from_sgid("SGWCMAID-test")
