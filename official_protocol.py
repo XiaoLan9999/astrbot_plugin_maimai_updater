@@ -8,11 +8,12 @@ import os
 import time
 import zlib
 from dataclasses import dataclass
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
 
 
-MAI_ENCODING = "1.53"
+MAI_ENCODING = "1.55"
 API_PREFIX = "MaimaiChn"
 OBFUSCATE_PARAM = "8bF76dE9"
 AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
@@ -48,9 +49,26 @@ class OfficialTitleEndpoint:
     verify_tls: bool = True
 
 
-OFFICIAL_TITLE_BASE_URL = "https://maimai-gm.wahlap.com:42081/Maimai2Servlet/"
+OFFICIAL_TITLE_SERVER_HOSTS = ("wq", "ai", "wi", "at")
+OFFICIAL_TITLE_SERVER_IP = "43.137.89.146"
+OFFICIAL_TITLE_BASE_URL = f"https://{OFFICIAL_TITLE_SERVER_IP}:42081/Maimai2Servlet/SDGB/"
 DEFAULT_OFFICIAL_TITLE_ENDPOINTS = (
-    OfficialTitleEndpoint(OFFICIAL_TITLE_BASE_URL),
+    *(
+        OfficialTitleEndpoint(
+            f"https://{OFFICIAL_TITLE_SERVER_IP}:42081/Maimai2Servlet/SDGB/",
+            host_header=f"{host}.sys-all.cn",
+            verify_tls=False,
+        )
+        for host in OFFICIAL_TITLE_SERVER_HOSTS
+    ),
+    *(
+        OfficialTitleEndpoint(
+            f"https://{OFFICIAL_TITLE_SERVER_IP}:42081/Maimai2Servlet/MAID/",
+            host_header=f"{host}.sys-all.cn",
+            verify_tls=False,
+        )
+        for host in OFFICIAL_TITLE_SERVER_HOSTS
+    ),
 )
 
 
@@ -296,6 +314,7 @@ class OfficialTitleClient:
         self.host_header = (host_header or "").strip()
         self.verify_tls = bool(verify_tls)
         self._client: Any | None = None
+        self._cookies: dict[str, str] = {}
 
     def _http_client(self) -> Any:
         if self._client is not None:
@@ -316,14 +335,54 @@ class OfficialTitleClient:
             await self._client.aclose()
             self._client = None
 
-    async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        try:
-            from maimai_ffi import request as ffi_request  # type: ignore
-        except ImportError as exc:  # pragma: no cover - depends on deployed deps.
-            raise OfficialProtocolUnavailableError("maimai-ffi is required for official title protocol") from exc
+    def _cookie_header(self) -> str:
+        return "; ".join(f"{key}={value}" for key, value in self._cookies.items())
 
-        async with ffi_request.AsyncClientGenerator(http_proxy=self.http_proxy) as client:
-            return await ffi_request.request(api, payload, client, user_id)
+    def _store_response_cookies(self, response: Any) -> None:
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return
+        get_list = getattr(headers, "get_list", None)
+        raw_values = get_list("set-cookie") if get_list else []
+        if not raw_values:
+            raw_value = headers.get("set-cookie") if hasattr(headers, "get") else ""
+            raw_values = [raw_value] if raw_value else []
+        for raw_value in raw_values:
+            cookie = SimpleCookie()
+            cookie.load(raw_value)
+            for key, morsel in cookie.items():
+                self._cookies[key] = morsel.value
+
+    async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        api_hash = obfuscate_api(api)
+        headers = {
+            "Content-Type": "application/json",
+            "charset": "UTF-8",
+            "Mai-Encoding": MAI_ENCODING,
+            "Content-Encoding": "deflate",
+            "User-Agent": f"{api_hash}#{int(user_id or 0)}",
+            "number": "0",
+        }
+        if self.host_header:
+            headers["Host"] = self.host_header
+        cookie_header = self._cookie_header()
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+
+        client = self._http_client()
+        response = await client.post(
+            f"{self.base_url}{api_hash}",
+            content=encode_request_payload(payload),
+            headers=headers,
+        )
+        response.raise_for_status()
+        self._store_response_cookies(response)
+        if not response.content:
+            raise OfficialTitleServerError("empty official title response")
+        try:
+            return decode_response_payload(response.content)
+        except Exception as exc:
+            raise OfficialTitleServerError("invalid official title response") from exc
 
     async def get_user_preview(self, session: ChimeSession) -> dict[str, Any]:
         return await self.post(

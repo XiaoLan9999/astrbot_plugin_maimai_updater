@@ -498,7 +498,7 @@ class MaimaiService:
 
     async def _fetch_official_details_and_rating(self, session: ChimeSession) -> tuple[list[dict[str, Any]], int, str]:
         last_error: BaseException | None = None
-        for endpoint in DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
+        for endpoint_index, endpoint in enumerate(DEFAULT_OFFICIAL_TITLE_ENDPOINTS, start=1):
             client = OfficialTitleClient(
                 base_url=endpoint.base_url,
                 client_id=self.official_client_id
@@ -515,8 +515,8 @@ class MaimaiService:
                     preview_data = await client.get_user_preview(session)
                 except Exception as exc:
                     logger.warning(
-                        "[MaimaiUpdater] official preview fetch failed via %s: %s: %s",
-                        endpoint.base_url,
+                        "[MaimaiUpdater] official preview fetch failed via endpoint #%s: %s: %s",
+                        endpoint_index,
                         exc.__class__.__name__,
                         exc,
                         exc_info=True,
@@ -530,8 +530,8 @@ class MaimaiService:
                     )
                 except Exception as exc:
                     logger.warning(
-                        "[MaimaiUpdater] official login request failed via %s: %s: %s",
-                        endpoint.base_url,
+                        "[MaimaiUpdater] official login request failed via endpoint #%s: %s: %s",
+                        endpoint_index,
                         exc.__class__.__name__,
                         exc,
                         exc_info=True,
@@ -542,26 +542,24 @@ class MaimaiService:
                     rating_data = await client.get_user_rating(session.user_id, token=session.token)
                 except Exception as exc:
                     logger.warning(
-                        "[MaimaiUpdater] official rating fetch failed via %s: %s: %s",
-                        endpoint.base_url,
+                        "[MaimaiUpdater] official rating fetch failed via endpoint #%s: %s: %s",
+                        endpoint_index,
                         exc.__class__.__name__,
                         exc,
                         exc_info=True,
                     )
                     rating_data = {}
                 logger.info(
-                    "[MaimaiUpdater] official title fetch succeeded via %s host=%s",
-                    endpoint.base_url,
-                    endpoint.host_header or "-",
+                    "[MaimaiUpdater] official title fetch succeeded via endpoint #%s",
+                    endpoint_index,
                 )
                 rating = self._extract_official_rating(rating_data) or self._extract_official_rating(preview_data)
                 return details, rating, endpoint.base_url
             except Exception as exc:
                 last_error = exc
                 logger.warning(
-                    "[MaimaiUpdater] official title fetch failed via %s host=%s: %s: %s",
-                    endpoint.base_url,
-                    endpoint.host_header or "-",
+                    "[MaimaiUpdater] official title fetch failed via endpoint #%s: %s: %s",
+                    endpoint_index,
                     exc.__class__.__name__,
                     exc,
                     exc_info=True,
@@ -659,8 +657,8 @@ class MaimaiService:
         if isinstance(exc, OfficialProtocolUnavailableError):
             return "官方完整成绩链路暂不可用，请稍后再试；若持续失败请联系插件维护者更新运行环境。"
 
-        if isinstance(exc, OfficialTitleServerError) and exc.__cause__ is not None:
-            return self.describe_error(exc.__cause__)
+        if isinstance(exc, OfficialTitleServerError):
+            return "官方完整成绩链路暂不可用，请稍后再试；若持续失败请联系插件维护者更新运行环境。"
 
         if isinstance(exc, ChimeSessionError):
             return "官方完整成绩链路暂不可用，请重新获取二维码后再试；若持续失败请联系插件维护者。"

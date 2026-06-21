@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import types
 from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from astrbot_plugin_maimai_updater.official_protocol import (
+    DEFAULT_OFFICIAL_TITLE_ENDPOINTS,
+    MAI_ENCODING,
+    OfficialTitleServerError,
     combo_status_to_fc_name,
     decode_response_payload,
     encode_request_payload,
@@ -65,60 +67,114 @@ class OfficialProtocolTest(unittest.TestCase):
         }
         self.assertEqual(decode_response_payload(encode_request_payload(payload)), payload)
 
+    def test_default_title_endpoints_include_current_title_paths(self):
+        base_urls = [endpoint.base_url for endpoint in DEFAULT_OFFICIAL_TITLE_ENDPOINTS]
+
+        self.assertTrue(any("/SDGB/" in base_url for base_url in base_urls))
+        self.assertTrue(any("/MAID/" in base_url for base_url in base_urls))
+        self.assertFalse(any("maimai-gm" in base_url for base_url in base_urls))
+
 
 class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
-    async def test_post_uses_maimai_ffi_request_layer(self):
+    @unittest.skipIf(importlib.util.find_spec("cryptography") is None, "cryptography not installed")
+    async def test_post_uses_official_http_endpoint(self):
         calls = []
 
-        class FakeClientGenerator:
-            def __init__(self, http_proxy=None):
-                calls.append(("generator", http_proxy))
+        class FakeResponse:
+            content = encode_request_payload({"ok": True})
 
-            async def __aenter__(self):
-                calls.append(("enter",))
-                return "fake-client"
+            def raise_for_status(self):
+                calls.append(("raise_for_status",))
 
-            async def __aexit__(self, exc_type, exc, tb):
-                calls.append(("exit", exc_type))
+        class FakeHttpClient:
+            async def post(self, url, *, content, headers):
+                calls.append(("post", url, content, headers))
+                return FakeResponse()
 
-        async def fake_request(api, payload, client, user_id):
-            calls.append(("request", api, payload, client, user_id))
-            return {"ok": True}
-
-        fake_request_module = types.SimpleNamespace(
-            AsyncClientGenerator=FakeClientGenerator,
-            request=fake_request,
+        client = OfficialTitleClient(
+            base_url="https://example.test/Maimai2Servlet/SDGB/",
+            client_id="",
+            host_header="title.example.test",
         )
-        fake_pkg = types.ModuleType("maimai_ffi")
-        fake_pkg.request = fake_request_module
-        old_pkg = sys.modules.get("maimai_ffi")
-        old_request = sys.modules.get("maimai_ffi.request")
-        sys.modules["maimai_ffi"] = fake_pkg
-        sys.modules["maimai_ffi.request"] = fake_request_module
-        try:
-            client = OfficialTitleClient(
-                base_url="https://ignored.example/Maimai2Servlet/",
-                client_id="",
-                http_proxy="http://127.0.0.1:7890",
-            )
-            self.assertEqual(
-                await client.post("GetUserRatingApi", 123, {"userId": 123}),
-                {"ok": True},
-            )
-        finally:
-            if old_pkg is None:
-                sys.modules.pop("maimai_ffi", None)
-            else:
-                sys.modules["maimai_ffi"] = old_pkg
-            if old_request is None:
-                sys.modules.pop("maimai_ffi.request", None)
-            else:
-                sys.modules["maimai_ffi.request"] = old_request
+        client._client = FakeHttpClient()
 
-        self.assertEqual(calls[0], ("generator", "http://127.0.0.1:7890"))
-        self.assertEqual(calls[1], ("enter",))
-        self.assertEqual(calls[2], ("request", "GetUserRatingApi", {"userId": 123}, "fake-client", 123))
-        self.assertEqual(calls[3], ("exit", None))
+        self.assertEqual(
+            await client.post("GetUserRatingApi", 123, {"userId": 123}),
+            {"ok": True},
+        )
+
+        api_hash = obfuscate_api("GetUserRatingApi")
+        self.assertEqual(calls[0][0], "post")
+        self.assertEqual(calls[0][1], f"https://example.test/Maimai2Servlet/SDGB/{api_hash}")
+        self.assertEqual(decode_response_payload(calls[0][2]), {"userId": 123})
+        self.assertEqual(calls[0][3]["Host"], "title.example.test")
+        self.assertEqual(calls[0][3]["Mai-Encoding"], MAI_ENCODING)
+        self.assertEqual(calls[0][3]["Content-Encoding"], "deflate")
+        self.assertEqual(calls[0][3]["User-Agent"], f"{api_hash}#123")
+        self.assertEqual(calls[1], ("raise_for_status",))
+
+    @unittest.skipIf(importlib.util.find_spec("cryptography") is None, "cryptography not installed")
+    async def test_post_rejects_empty_official_response(self):
+        class FakeResponse:
+            content = b""
+
+            def raise_for_status(self):
+                return None
+
+        class FakeHttpClient:
+            async def post(self, url, *, content, headers):
+                return FakeResponse()
+
+        client = OfficialTitleClient(
+            base_url="https://example.test/Maimai2Servlet/SDGB/",
+            client_id="",
+        )
+        client._client = FakeHttpClient()
+
+        with self.assertRaises(OfficialTitleServerError):
+            await client.post("GetUserRatingApi", 123, {"userId": 123})
+
+    @unittest.skipIf(importlib.util.find_spec("cryptography") is None, "cryptography not installed")
+    async def test_post_replays_official_session_cookie(self):
+        calls = []
+
+        class FakeHeaders:
+            def __init__(self, values=None):
+                self.values = list(values or [])
+
+            def get_list(self, name):
+                return self.values if name.lower() == "set-cookie" else []
+
+        class FakeResponse:
+            def __init__(self, headers):
+                self.headers = headers
+                self.content = encode_request_payload({"ok": True})
+
+            def raise_for_status(self):
+                return None
+
+        class FakeHttpClient:
+            def __init__(self):
+                self.count = 0
+
+            async def post(self, url, *, content, headers):
+                calls.append(headers)
+                self.count += 1
+                if self.count == 1:
+                    return FakeResponse(FakeHeaders(["sid=abc123; Path=/; HttpOnly"]))
+                return FakeResponse(FakeHeaders())
+
+        client = OfficialTitleClient(
+            base_url="https://example.test/Maimai2Servlet/SDGB/",
+            client_id="",
+        )
+        client._client = FakeHttpClient()
+
+        await client.post("UserLoginApi", 123, {"userId": 123})
+        await client.post("GetUserMusicApi", 123, {"userId": 123})
+
+        self.assertNotIn("Cookie", calls[0])
+        self.assertEqual(calls[1]["Cookie"], "sid=abc123")
 
     async def test_get_user_music_and_rating_send_session_token(self):
         calls = []
