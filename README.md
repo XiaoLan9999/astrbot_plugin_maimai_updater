@@ -1,10 +1,15 @@
-﻿# AstrBot maimai 水鱼更新器
+# AstrBot maimai 水鱼更新器
 
 这是一个独立的 AstrBot 插件，用一次性的舞萌 DX 官方二维码识别文本 `SGWCMAID/SGID`，把官方成绩同步到水鱼查分器。
 
 ![maimai 水鱼更新流程](assets/maimai-updater-flow.png)
 
 ## 更新日志
+
+### v0.6.9
+
+- 修复官方完整成绩链路会话初始化参数与内置运行环境不一致的问题。
+- 保持一次性 SGID 更新流程不变；用户不需要新增面板配置。
 
 ### v0.6.8
 

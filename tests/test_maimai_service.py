@@ -144,6 +144,12 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(path.name, "core.dat")
         self.assertTrue(path.is_file())
 
+    def test_default_official_session_game_id_matches_runtime(self):
+        service = MaimaiService()
+
+        self.assertEqual(service.official_game_id, "SDGB")
+        self.assertEqual(MaimaiService(official_game_id="").official_game_id, "SDGB")
+
     async def test_bind_from_sgid_only_validates_qrcode(self):
         service = self.make_service()
         result = await service.bind_from_sgid("SGWCMAID-test")

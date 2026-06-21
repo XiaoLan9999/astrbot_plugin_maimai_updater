@@ -178,7 +178,7 @@ class ChimeSessionResolver:
         self,
         *,
         dll_path: str,
-        game_id: str = "MAID",
+        game_id: str = "SDGB",
         qr_game_id: str = "MAID",
         chip_id: str = "",
         common_key: str = "",
@@ -188,7 +188,7 @@ class ChimeSessionResolver:
         poll_interval: float = 0.05,
     ) -> None:
         self.dll_path = Path(dll_path).expanduser()
-        self.game_id = game_id or "MAID"
+        self.game_id = game_id or "SDGB"
         self.qr_game_id = qr_game_id or "MAID"
         self.chip_id = chip_id or ""
         self.common_key = common_key or ""
