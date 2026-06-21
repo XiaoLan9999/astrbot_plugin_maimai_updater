@@ -6,6 +6,11 @@
 
 ## 更新日志
 
+### v0.6.4
+
+- 修复官方 userId 获取：不再尝试截获 maimai-ffi 的 Fernet 明文，改为复用 ffi 本地解析后的 `GetUserRivalMusicApi` payload 捕获 `userId`，不会发出这次探针请求。
+- 标准 AstrBot 命令路径在识别到 Token/SGID 后立即 `stop_event()`，避免敏感内容继续进入 LLM 或其它监听插件。
+
 ### v0.6.3
 
 - 默认更新链路改为官包确认出的官方完整成绩链路：本次 SGID -> 官方 userId -> `GetUserMusicApi` / `GetUserRatingApi` -> 水鱼导入。

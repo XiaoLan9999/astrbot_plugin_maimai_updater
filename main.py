@@ -37,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.6.3",
+    "0.6.4",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -156,6 +156,7 @@ class MaimaiUpdaterPlugin(Star):
             await event.send(result)
 
     async def _update_from_credential(self, event: AstrMessageEvent, credential_text: str) -> None:
+        event.stop_event()
         user_key = self._user_key(event)
         record = self.store.get(user_key)
         if not record.divingfish_import_token:
@@ -230,8 +231,8 @@ class MaimaiUpdaterPlugin(Star):
                 "群聊中我会尝试撤回包含 Token 的消息。"
             )
 
-        await self._recall_current_message(event)
         event.stop_event()
+        await self._recall_current_message(event)
 
         if not is_probable_import_token(token):
             await self._send_text(
@@ -266,8 +267,8 @@ class MaimaiUpdaterPlugin(Star):
                 "注意：SGID 只能使用一次，请每次从官方二维码重新识别后再更新。"
             )
 
-        await self._recall_current_message(event)
         event.stop_event()
+        await self._recall_current_message(event)
         await self._update_from_credential(event, credential_text)
 
     @command("maimaiclear", alias={"清空水鱼", "清空b50", "清空B50"})

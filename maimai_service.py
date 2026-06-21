@@ -127,7 +127,7 @@ class MaimaiService:
         self.official_server_url_index = int(official_server_url_index or 0)
         self.official_keychip_id = (official_keychip_id or "").strip()
         self.official_game_id = (official_game_id or "MAID").strip() or "MAID"
-        self._ffi_fernet_lock = asyncio.Lock()
+        self._ffi_request_lock = asyncio.Lock()
 
     def _ensure_dependency_versions(self) -> None:
         requirements = (
@@ -391,33 +391,31 @@ class MaimaiService:
         except ImportError as exc:
             raise MaimaiDependencyError("missing maimai-ffi arcade module") from exc
 
-        captured: list[bytes] = []
-        original_fernet = getattr(ffi_arcade, "Fernet", None)
-        if original_fernet is None:
-            raise OfficialProtocolUnavailableError("maimai-ffi arcade Fernet hook is unavailable")
+        request_module = getattr(ffi_arcade, "request", None)
+        original_paginated = getattr(request_module, "request_paginated", None)
+        if request_module is None or original_paginated is None:
+            raise OfficialProtocolUnavailableError("maimai-ffi arcade request hook is unavailable")
 
-        class CaptureFernet:
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                self._inner = original_fernet(*args, **kwargs)
+        captured_user_ids: list[int] = []
 
-            def encrypt(self, data: bytes) -> bytes:
-                captured.append(data)
-                return self._inner.encrypt(data)
+        async def capture_request_paginated(path: str, data: dict[str, Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
+            for candidate in (data.get("userId"), data.get("rivalId"), args[1] if len(args) > 1 else None):
+                user_id = self._decode_user_id(candidate)
+                if user_id > 0:
+                    captured_user_ids.append(user_id)
+                    break
+            return {"userRivalMusicList": []}
 
-            def decrypt(self, token: bytes) -> bytes:
-                return self._inner.decrypt(token)
-
-        async with self._ffi_fernet_lock:
-            setattr(ffi_arcade, "Fernet", CaptureFernet)
+        encrypted = await ffi_arcade.get_uid_encrypted(str(sgid), http_proxy=self.http_proxy)
+        async with self._ffi_request_lock:
+            setattr(request_module, "request_paginated", capture_request_paginated)
             try:
-                encrypted = await ffi_arcade.get_uid_encrypted(str(sgid), http_proxy=self.http_proxy)
+                await ffi_arcade.get_user_scores(encrypted, http_proxy=self.http_proxy)
             finally:
-                setattr(ffi_arcade, "Fernet", original_fernet)
+                setattr(request_module, "request_paginated", original_paginated)
 
-        for candidate in [*captured, encrypted]:
-            user_id = self._decode_user_id(candidate)
-            if user_id > 0:
-                return user_id
+        if captured_user_ids:
+            return captured_user_ids[0]
         raise OfficialProtocolUnavailableError("official SGID resolver did not expose user_id")
 
     async def _fetch_official_details_and_rating(self, user_id: int) -> tuple[list[dict[str, Any]], int, str]:

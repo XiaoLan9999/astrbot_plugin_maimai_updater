@@ -226,24 +226,26 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_official_sgid_resolver_captures_user_id_without_saving_sgid(self):
         service = self.make_service()
-        fake_arcade = types.SimpleNamespace()
-
-        class FakeFernet:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def encrypt(self, data: bytes) -> bytes:
-                return b"encrypted-user-id"
-
-            def decrypt(self, token: bytes) -> bytes:
-                return b""
+        fake_request = types.SimpleNamespace()
+        original_paginated = object()
+        fake_request.request_paginated = original_paginated
+        fake_arcade = types.SimpleNamespace(request=fake_request)
 
         async def fake_get_uid_encrypted(code: str, http_proxy=None):
-            fake_arcade.call = (code, http_proxy)
-            return fake_arcade.Fernet(b"key").encrypt(b"12345678")
+            fake_arcade.qr_call = (code, http_proxy)
+            return b"encrypted-credentials"
 
-        fake_arcade.Fernet = FakeFernet
+        async def fake_get_user_scores(credentials: bytes, http_proxy=None):
+            fake_arcade.score_call = (credentials, http_proxy)
+            return await fake_arcade.request.request_paginated(
+                "GetUserRivalMusicApi",
+                {"userId": 12345678, "rivalId": 12345678},
+                object(),
+                12345678,
+            )
+
         fake_arcade.get_uid_encrypted = fake_get_uid_encrypted
+        fake_arcade.get_user_scores = fake_get_user_scores
         fake_pkg = types.ModuleType("maimai_ffi")
         fake_pkg.arcade = fake_arcade
         old_pkg = sys.modules.get("maimai_ffi")
@@ -263,8 +265,9 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
                 sys.modules["maimai_ffi.arcade"] = old_arcade
 
         self.assertEqual(user_id, 12345678)
-        self.assertEqual(fake_arcade.call, ("SGWCMAID-test", "http://127.0.0.1:7890"))
-        self.assertIs(fake_arcade.Fernet, FakeFernet)
+        self.assertEqual(fake_arcade.qr_call, ("SGWCMAID-test", "http://127.0.0.1:7890"))
+        self.assertEqual(fake_arcade.score_call, (b"encrypted-credentials", "http://127.0.0.1:7890"))
+        self.assertIs(fake_arcade.request.request_paginated, original_paginated)
 
     def test_legacy_official_flag_maps_to_official_only(self):
         service = MaimaiService(official_protocol_enabled=True)
