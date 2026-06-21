@@ -147,8 +147,10 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     def test_default_official_session_game_id_matches_runtime(self):
         service = MaimaiService()
 
-        self.assertEqual(service.official_game_id, "SDGB")
-        self.assertEqual(MaimaiService(official_game_id="").official_game_id, "SDGB")
+        self.assertEqual(service.official_game_id, "MAID")
+        self.assertEqual(service.official_title_key, "SDGB")
+        self.assertEqual(MaimaiService(official_game_id="").official_game_id, "MAID")
+        self.assertEqual(MaimaiService(official_title_key="").official_title_key, "SDGB")
 
     async def test_bind_from_sgid_only_validates_qrcode(self):
         service = self.make_service()

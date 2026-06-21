@@ -116,7 +116,8 @@ class MaimaiService:
         official_place_id: int = 0,
         official_server_url_index: int = 0,
         official_keychip_id: str = "",
-        official_game_id: str = "SDGB",
+        official_game_id: str = "MAID",
+        official_title_key: str = "SDGB",
     ):
         self.timeout = float(timeout or 30.0)
         self.http_proxy = (http_proxy or "").strip() or None
@@ -131,7 +132,8 @@ class MaimaiService:
         self.official_place_id = int(official_place_id or 0)
         self.official_server_url_index = int(official_server_url_index or 0)
         self.official_keychip_id = (official_keychip_id or "").strip()
-        self.official_game_id = (official_game_id or "SDGB").strip() or "SDGB"
+        self.official_game_id = (official_game_id or "MAID").strip() or "MAID"
+        self.official_title_key = (official_title_key or "SDGB").strip() or "SDGB"
         self._ffi_request_lock = asyncio.Lock()
 
     def _ensure_dependency_versions(self) -> None:
@@ -290,9 +292,10 @@ class MaimaiService:
 
         resolver = ChimeSessionResolver(
             dll_path=str(dll_path),
-            game_id=self.official_game_id or "SDGB",
+            game_id=self.official_game_id or "MAID",
             qr_game_id="MAID",
             chip_id=self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID,
+            title_key=self.official_title_key or "SDGB",
             server_url_index=self.official_server_url_index,
             timeout=self.timeout,
         )

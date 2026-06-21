@@ -37,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.6.9",
+    "0.6.10",
     "",
 )
 class MaimaiUpdaterPlugin(Star):

@@ -25,8 +25,9 @@ class OfficialProtocolTest(unittest.TestCase):
     def test_chime_session_default_game_ids(self):
         resolver = ChimeSessionResolver(dll_path=__file__)
 
-        self.assertEqual(resolver.game_id, "SDGB")
+        self.assertEqual(resolver.game_id, "MAID")
         self.assertEqual(resolver.qr_game_id, "MAID")
+        self.assertEqual(resolver.title_key, "SDGB")
 
     def test_official_api_name_and_obfuscation(self):
         self.assertEqual(official_api_name("GetUserMusicApi"), "MaimaiChnGetUserMusicApi")
