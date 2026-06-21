@@ -179,6 +179,7 @@ class ChimeSessionResolver:
         *,
         dll_path: str,
         game_id: str = "MAID",
+        qr_game_id: str = "MAID",
         chip_id: str = "",
         common_key: str = "",
         title_key: str = "",
@@ -188,6 +189,7 @@ class ChimeSessionResolver:
     ) -> None:
         self.dll_path = Path(dll_path).expanduser()
         self.game_id = game_id or "MAID"
+        self.qr_game_id = qr_game_id or "MAID"
         self.chip_id = chip_id or ""
         self.common_key = common_key or ""
         self.title_key = title_key or ""
@@ -235,7 +237,7 @@ class ChimeSessionResolver:
 
     def resolve(self, sgid: str) -> ChimeSession:
         dll = self._load()
-        qr_data = erase_sgid_hash_identifier(sgid, game_id=self.game_id)
+        qr_data = erase_sgid_hash_identifier(sgid, game_id=self.qr_game_id)
         handle = dll.CCommGetUserData_Create(
             self.game_id,
             self.chip_id,
@@ -362,18 +364,27 @@ class OfficialTitleClient:
             },
         )
 
-    async def get_user_music(self, user_id: int, *, max_count: int = 50) -> list[dict[str, Any]]:
+    async def get_user_music(
+        self,
+        user_id: int,
+        *,
+        token: str = "",
+        max_count: int = 50,
+    ) -> list[dict[str, Any]]:
         details: list[dict[str, Any]] = []
         next_index = 0
         while True:
+            payload: dict[str, Any] = {
+                "userId": user_id,
+                "nextIndex": next_index,
+                "maxCount": int(max_count or 50),
+            }
+            if token:
+                payload["token"] = token
             response = await self.post(
                 "GetUserMusicApi",
                 user_id,
-                {
-                    "userId": user_id,
-                    "nextIndex": next_index,
-                    "maxCount": int(max_count or 50),
-                },
+                payload,
             )
             for music in response.get("userMusicList") or []:
                 details.extend(music.get("userMusicDetailList") or [])
@@ -381,10 +392,16 @@ class OfficialTitleClient:
             if next_index == 0:
                 return details
 
-    async def get_user_rating(self, user_id: int) -> dict[str, Any]:
-        response = await self.post("GetUserRatingApi", user_id, {"userId": user_id})
+    async def get_user_rating(self, user_id: int, *, token: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"userId": user_id}
+        if token:
+            payload["token"] = token
+        response = await self.post("GetUserRatingApi", user_id, payload)
         return response.get("userRating") or {}
 
-    async def get_user_charge(self, user_id: int) -> list[dict[str, Any]]:
-        response = await self.post("GetUserChargeApi", user_id, {"userId": user_id})
+    async def get_user_charge(self, user_id: int, *, token: str = "") -> list[dict[str, Any]]:
+        payload: dict[str, Any] = {"userId": user_id}
+        if token:
+            payload["token"] = token
+        response = await self.post("GetUserChargeApi", user_id, payload)
         return list(response.get("userChargeList") or [])

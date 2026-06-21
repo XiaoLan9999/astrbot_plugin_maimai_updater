@@ -39,6 +39,12 @@
     "type": "string",
     "default": ""
   },
+  "official_chimelib_dll_path": {
+    "description": "chimelib_dll.dll 路径",
+    "hint": "可选。用于从一次性 SGID 获取官方 token/session，读取带 FC/FS/AP 的完整官方成绩。填写官包 Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 的绝对路径；留空时会尝试读取插件目录或 bin 目录下的 chimelib_dll.dll。插件不会保存 SGID 或官方 token。",
+    "type": "string",
+    "default": ""
+  },
   "kook_token": {
     "description": "KOOK Bot Token",
     "hint": "用于群聊撤回包含 SGID/水鱼 Token 的消息。留空时会尝试从 KOOK 平台配置读取。",

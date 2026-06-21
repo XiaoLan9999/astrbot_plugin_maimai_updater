@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from importlib import metadata
 from typing import Any
 
 from .official_protocol import (
     DEFAULT_OFFICIAL_TITLE_ENDPOINTS,
+    ChimeSession,
+    ChimeSessionError,
+    ChimeSessionResolver,
     OfficialProtocolError,
     OfficialProtocolUnavailableError,
     OfficialTitleClient,
@@ -38,6 +42,7 @@ SCORE_SOURCE_MODES = {
     SCORE_SOURCE_OFFICIAL_ONLY,
     SCORE_SOURCE_OFFICIAL_THEN_ARCADE,
 }
+DEFAULT_OFFICIAL_KEYCHIP_ID = "A63E-01E11890000"
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -231,6 +236,77 @@ class MaimaiService:
     def _identifier(self, *, credentials: str) -> Any:
         return self._load_imports()["PlayerIdentifier"](credentials=credentials)
 
+    def _configured_chimelib_path(self) -> Path | None:
+        if not self.official_chimelib_dll_path:
+            return None
+        return Path(self.official_chimelib_dll_path).expanduser()
+
+    def _chimelib_candidates(self) -> list[Path]:
+        plugin_dir = Path(__file__).resolve().parent
+        candidates = [
+            plugin_dir / "chimelib_dll.dll",
+            plugin_dir / "bin" / "chimelib_dll.dll",
+        ]
+        for parent in plugin_dir.parents:
+            candidates.append(
+                parent
+                / "sdgb_analysis"
+                / "extracted"
+                / "Package"
+                / "Sinmai_Data"
+                / "Plugins"
+                / "chimelib_dll.dll"
+            )
+        seen: set[str] = set()
+        unique: list[Path] = []
+        for candidate in candidates:
+            key = str(candidate).lower()
+            if key not in seen:
+                unique.append(candidate)
+                seen.add(key)
+        return unique
+
+    def _find_chimelib_dll_path(self) -> Path | None:
+        configured = self._configured_chimelib_path()
+        if configured is not None:
+            if configured.is_file():
+                return configured
+            raise OfficialProtocolUnavailableError(
+                f"chimelib_dll.dll 路径不存在：{configured}"
+            )
+
+        for candidate in self._chimelib_candidates():
+            if candidate.is_file():
+                return candidate
+        return None
+
+    async def _official_session_from_sgid(self, sgid: str) -> ChimeSession:
+        dll_path = self._find_chimelib_dll_path()
+        if dll_path is None:
+            raise OfficialProtocolUnavailableError(
+                "未找到 chimelib_dll.dll，无法从一次性 SGID 获取官方 token。"
+                "请在面板配置 official_chimelib_dll_path，或把官包里的 "
+                "Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 复制到插件目录。"
+            )
+
+        resolver = ChimeSessionResolver(
+            dll_path=str(dll_path),
+            game_id=self.official_game_id or "MAID",
+            qr_game_id="MAID",
+            chip_id=self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID,
+            server_url_index=self.official_server_url_index,
+            timeout=self.timeout,
+        )
+        try:
+            session = await resolver.resolve_async(sgid)
+        except ChimeSessionError:
+            raise
+        logger.info(
+            "[MaimaiUpdater] resolved official session via chimelib_dll.dll user_id=%s",
+            session.user_id,
+        )
+        return session
+
     def _log_nonfatal_player_error(self, exc: BaseException, *, stage: str) -> None:
         logger.warning(
             "[MaimaiUpdater] player metadata fetch failed during %s: %s: %s",
@@ -418,21 +494,50 @@ class MaimaiService:
             return captured_user_ids[0]
         raise OfficialProtocolUnavailableError("official SGID resolver did not expose user_id")
 
-    async def _fetch_official_details_and_rating(self, user_id: int) -> tuple[list[dict[str, Any]], int, str]:
+    async def _fetch_official_details_and_rating(self, session: ChimeSession) -> tuple[list[dict[str, Any]], int, str]:
         last_error: BaseException | None = None
         for endpoint in DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
             client = OfficialTitleClient(
                 base_url=endpoint.base_url,
-                client_id="",
+                client_id=self.official_client_id
+                or self.official_keychip_id
+                or DEFAULT_OFFICIAL_KEYCHIP_ID,
                 timeout=self.timeout,
                 http_proxy=self.http_proxy,
                 host_header=endpoint.host_header,
                 verify_tls=endpoint.verify_tls,
             )
             try:
-                details = await client.get_user_music(user_id)
+                preview_data: dict[str, Any] = {}
                 try:
-                    rating_data = await client.get_user_rating(user_id)
+                    preview_data = await client.get_user_preview(session)
+                except Exception as exc:
+                    logger.warning(
+                        "[MaimaiUpdater] official preview fetch failed via %s: %s: %s",
+                        endpoint.base_url,
+                        exc.__class__.__name__,
+                        exc,
+                        exc_info=True,
+                    )
+
+                try:
+                    await client.user_login(
+                        session,
+                        region_id=self.official_region_id,
+                        place_id=self.official_place_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[MaimaiUpdater] official login request failed via %s: %s: %s",
+                        endpoint.base_url,
+                        exc.__class__.__name__,
+                        exc,
+                        exc_info=True,
+                    )
+
+                details = await client.get_user_music(session.user_id, token=session.token)
+                try:
+                    rating_data = await client.get_user_rating(session.user_id, token=session.token)
                 except Exception as exc:
                     logger.warning(
                         "[MaimaiUpdater] official rating fetch failed via %s: %s: %s",
@@ -447,7 +552,8 @@ class MaimaiService:
                     endpoint.base_url,
                     endpoint.host_header or "-",
                 )
-                return details, self._extract_official_rating(rating_data), endpoint.base_url
+                rating = self._extract_official_rating(rating_data) or self._extract_official_rating(preview_data)
+                return details, rating, endpoint.base_url
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -463,8 +569,8 @@ class MaimaiService:
         raise OfficialTitleServerError("all built-in official title server endpoints failed") from last_error
 
     async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
-        user_id = await self._official_user_id_from_sgid(sgid)
-        details, rating, _endpoint = await self._fetch_official_details_and_rating(user_id)
+        session = await self._official_session_from_sgid(sgid)
+        details, rating, _endpoint = await self._fetch_official_details_and_rating(session)
         scores = await self._official_details_to_scores(details)
         await self.client.updates(
             self._identifier(credentials=import_token),
@@ -549,7 +655,11 @@ class MaimaiService:
             return str(exc)
 
         if isinstance(exc, OfficialProtocolUnavailableError):
-            return "官方完整成绩链路暂不可用：无法从本次 SGID 获取官方 userId，或内置标题服候选均请求失败。请重新获取二维码后再试。"
+            return (
+                "官方完整成绩链路暂不可用：无法从本次 SGID 获取官方 token/session。"
+                "请确认已在面板配置 chimelib_dll.dll 路径，或把官包里的 "
+                "Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 复制到插件目录后重载插件。"
+            )
 
         if isinstance(exc, OfficialTitleServerError) and exc.__cause__ is not None:
             return self.describe_error(exc.__cause__)

@@ -1,7 +1,7 @@
 name: astrbot_plugin_maimai_updater
 display_name: 舞萌 DX 水鱼更新器
 desc: 使用一次性舞萌官方二维码 SGID 和水鱼 Import-Token，同步成绩到水鱼查分器；插件不会保存 SGID 或官方临时凭据。
-version: v0.6.5
+version: v0.6.6
 author: User
 repo: "https://github.com/XiaoLan9999/astrbot_plugin_maimai_updater"
 astrbot_version: ">=4.5.2"

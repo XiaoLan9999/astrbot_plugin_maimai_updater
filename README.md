@@ -6,6 +6,12 @@
 
 ## 更新日志
 
+### v0.6.6
+
+- 修复 `GetUserMusicApi` 只带 `userId` 时返回非 JSON 响应的问题：更新流程现在会先通过 `chimelib_dll.dll` 从本次 SGID 获取官方 token/session，再请求官方完整成绩。
+- `GetUserMusicApi`、`GetUserRatingApi` 会携带本次官方 token，避免裸 `userId` 请求导致标题服拒绝或返回异常密文。
+- 面板新增可选 `chimelib_dll.dll 路径`；也可以把官包 `Package/Sinmai_Data/Plugins/chimelib_dll.dll` 复制到插件目录或 `bin` 目录自动发现。插件仍然不会保存 SGID、官方 token/session 或 userId。
+
 ### v0.6.5
 
 - 修复标题服 404：官方完整成绩请求改为直接复用 `maimai-ffi.request` 层，由 ffi 构造 Wahlap GM 标题服 URL、API hash、`Mai-Encoding` 与加密载荷。
@@ -85,11 +91,11 @@
 2. 用户每次从官方二维码识别出新的 `SGWCMAID...` 文本。
 3. 用户发送 `更新水鱼 SGWCMAID...`。
 4. 插件立即尝试撤回群聊中的 SGID 消息。
-5. 插件用本次 SGID 当场解析官方 userId，然后请求官包确认出的 `Maimai2Servlet/GetUserMusicApi` 与 `GetUserRatingApi` 拉取完整成绩并同步到水鱼。
+5. 插件用本次 SGID 当场通过 `chimelib_dll.dll` 解析官方 `userId + token/session`，再请求官包确认出的 `Maimai2Servlet/GetUserMusicApi` 与 `GetUserRatingApi` 拉取完整成绩并同步到水鱼。
 
-SGID、MAI 临时会话、官方 userId/token 都是一次性信息。插件不会保存这些内容，也不会要求用户在面板里填写 MAI ID、Keychip ID、placeId、serverURLIndex 等官包内部字段。
+SGID、MAI 临时会话、官方 userId/token 都是一次性信息。插件不会保存这些内容，也不会要求用户在面板里填写 MAI ID、Keychip ID、placeId、serverURLIndex 等官包内部字段。要读取带 FC/FS/AP 的官方完整成绩，需要在运行环境提供 `chimelib_dll.dll`：可以在面板填写绝对路径，也可以把它复制到插件目录或插件目录下的 `bin` 目录。
 
-我用你提供的 pack 包确认过官包内存在 `GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路。插件现在通过 `maimai-ffi.request` 复用 Wahlap GM 标题服请求层，并把官方 `comboStatus` / `syncStatus` 转换为水鱼可识别的 FC/FS/AP 等标识；普通用户不需要手动填写官包内部配置。
+我用你提供的 pack 包确认过官包内存在 `CCommGetUserData_*`、`GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路。插件现在通过 `chimelib_dll.dll` 从一次性 SGID 获取本次官方会话，并通过 `maimai-ffi.request` 复用 Wahlap GM 标题服请求层，把官方 `comboStatus` / `syncStatus` 转换为水鱼可识别的 FC/FS/AP 等标识。
 
 ## 安全说明
 

@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from astrbot_plugin_maimai_updater.official_protocol import ChimeSession
 from astrbot_plugin_maimai_updater.maimai_service import (
     MaimaiDependencyError,
     OfficialProtocolUnavailableError,
@@ -145,12 +146,12 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_sync_from_sgid_defaults_to_official_full_score_path(self):
         service = self.make_service()
 
-        async def fake_user_id_from_sgid(sgid: str) -> int:
+        async def fake_session_from_sgid(sgid: str) -> ChimeSession:
             service.seen_sgid = sgid
-            return 24681357
+            return ChimeSession(user_id=24681357, token="session-token")
 
-        async def fake_fetch(user_id: int):
-            service.seen_user_id = user_id
+        async def fake_fetch(session: ChimeSession):
+            service.seen_session = session
             return (
                 [
                     {
@@ -167,7 +168,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
                 "https://wq.sys-all.cn/Maimai2Servlet/",
             )
 
-        service._official_user_id_from_sgid = fake_user_id_from_sgid
+        service._official_session_from_sgid = fake_session_from_sgid
         service._fetch_official_details_and_rating = fake_fetch
 
         result = await service.sync_from_sgid_to_divingfish(
@@ -176,7 +177,8 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(service.seen_sgid, "SGWCMAID-test")
-        self.assertEqual(service.seen_user_id, 24681357)
+        self.assertEqual(service.seen_session.user_id, 24681357)
+        self.assertEqual(service.seen_session.token, "session-token")
         self.assertFalse(hasattr(service.client, "qrcode_input"))
         self.assertEqual(result.source, "official")
         self.assertEqual(result.score_count, 1)
@@ -291,8 +293,8 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         service = self.make_service()
         message = service.describe_error(OfficialProtocolUnavailableError("no user id"))
         self.assertIn("SGID", message)
-        self.assertIn("userId", message)
-        self.assertNotIn("chimelib", message)
+        self.assertIn("token/session", message)
+        self.assertIn("chimelib_dll.dll", message)
 
 
 class VersionTest(unittest.TestCase):

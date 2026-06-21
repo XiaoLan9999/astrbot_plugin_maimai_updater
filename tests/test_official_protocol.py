@@ -112,6 +112,28 @@ class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[2], ("request", "GetUserRatingApi", {"userId": 123}, "fake-client", 123))
         self.assertEqual(calls[3], ("exit", None))
 
+    async def test_get_user_music_and_rating_send_session_token(self):
+        calls = []
+        client = OfficialTitleClient(
+            base_url="https://ignored.example/Maimai2Servlet/",
+            client_id="client-id",
+        )
+
+        async def fake_post(api, user_id, payload):
+            calls.append((api, user_id, payload))
+            if api == "GetUserMusicApi":
+                return {"userMusicList": [], "nextIndex": 0}
+            return {"userRating": {"rating": 14370}}
+
+        client.post = fake_post
+        self.assertEqual(await client.get_user_music(123, token="session-token"), [])
+        self.assertEqual(await client.get_user_rating(123, token="session-token"), {"rating": 14370})
+
+        self.assertEqual(calls[0][0], "GetUserMusicApi")
+        self.assertEqual(calls[0][2]["token"], "session-token")
+        self.assertEqual(calls[1][0], "GetUserRatingApi")
+        self.assertEqual(calls[1][2]["token"], "session-token")
+
 
 if __name__ == "__main__":
     unittest.main()
