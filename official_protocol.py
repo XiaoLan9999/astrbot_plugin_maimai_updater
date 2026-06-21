@@ -203,9 +203,9 @@ class ChimeSessionResolver:
         if self._dll is not None:
             return self._dll
         if os.name != "nt":
-            raise OfficialProtocolUnavailableError("chimelib_dll is only supported on Windows")
+            raise OfficialProtocolUnavailableError("official runtime is not supported in this environment")
         if not self.dll_path.is_file():
-            raise OfficialProtocolUnavailableError("chimelib_dll path does not exist")
+            raise OfficialProtocolUnavailableError("official runtime asset is unavailable")
 
         if hasattr(os, "add_dll_directory"):
             self._dll_dir_handle = os.add_dll_directory(str(self.dll_path.parent))
@@ -261,7 +261,7 @@ class ChimeSessionResolver:
 
             error_id = int(dll.CCommGetUserData_getErrorID(handle))
             if error_id != 0:
-                raise ChimeSessionError(f"official chime session failed: error_id={error_id}")
+                raise ChimeSessionError(f"official session failed: error_id={error_id}")
 
             user_id = int(dll.CCommGetUserData_getUserID(handle))
             token_bytes = dll.CCommGetUserData_getToken(handle) or b""

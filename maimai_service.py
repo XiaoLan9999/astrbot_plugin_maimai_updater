@@ -272,7 +272,7 @@ class MaimaiService:
             if configured.is_file():
                 return configured
             raise OfficialProtocolUnavailableError(
-                f"chimelib_dll.dll 路径不存在：{configured}"
+                "official runtime asset is unavailable"
             )
 
         for candidate in self._chimelib_candidates():
@@ -284,9 +284,7 @@ class MaimaiService:
         dll_path = self._find_chimelib_dll_path()
         if dll_path is None:
             raise OfficialProtocolUnavailableError(
-                "未找到 chimelib_dll.dll，无法从一次性 SGID 获取官方 token。"
-                "请在面板配置 official_chimelib_dll_path，或把官包里的 "
-                "Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 复制到插件目录。"
+                "official runtime asset is unavailable"
             )
 
         resolver = ChimeSessionResolver(
@@ -302,7 +300,7 @@ class MaimaiService:
         except ChimeSessionError:
             raise
         logger.info(
-            "[MaimaiUpdater] resolved official session via chimelib_dll.dll user_id=%s",
+            "[MaimaiUpdater] resolved official one-time session user_id=%s",
             session.user_id,
         )
         return session
@@ -655,23 +653,22 @@ class MaimaiService:
             return str(exc)
 
         if isinstance(exc, OfficialProtocolUnavailableError):
-            return (
-                "官方完整成绩链路暂不可用：无法从本次 SGID 获取官方 token/session。"
-                "请确认已在面板配置 chimelib_dll.dll 路径，或把官包里的 "
-                "Package\\Sinmai_Data\\Plugins\\chimelib_dll.dll 复制到插件目录后重载插件。"
-            )
+            return "官方完整成绩链路暂不可用，请稍后再试；若持续失败请联系插件维护者更新运行环境。"
 
         if isinstance(exc, OfficialTitleServerError) and exc.__cause__ is not None:
             return self.describe_error(exc.__cause__)
 
+        if isinstance(exc, ChimeSessionError):
+            return "官方完整成绩链路暂不可用，请重新获取二维码后再试；若持续失败请联系插件维护者。"
+
         if isinstance(exc, OfficialProtocolError):
-            return f"官方完整成绩链路失败：{exc}"
+            return "官方完整成绩链路失败，请稍后再试；若持续失败请联系插件维护者。"
 
         class_name = exc.__class__.__name__
         ffi_messages = {
-            "TitleServerBlockedError": "舞萌标题服务器拒绝了当前请求，可能是当前 IP 暂时被限制，请稍后再试或更换网络。",
+            "TitleServerBlockedError": "舞萌标题服务器拒绝了当前请求，可能是当前网络环境暂时受限，请稍后再试或更换网络。",
             "TitleServerNetworkError": "舞萌标题服务器网络请求失败，请稍后再试。",
-            "TitleServerError": "舞萌标题服务器请求失败，可能是网络波动或当前 IP 暂时被限制，请稍后再试。",
+            "TitleServerError": "舞萌标题服务器请求失败，可能是网络波动或当前网络环境暂时受限，请稍后再试。",
             "AimeServerError": "二维码无效或已过期，请重新从官方公众号获取二维码后再试。",
             "ArcadeIdentifierError": "官方二维码凭据无效或已过期，请重新从官方公众号获取二维码后再试。",
         }
@@ -681,9 +678,9 @@ class MaimaiService:
         imports = self._imports or {}
         checks = (
             ("AimeServerError", "二维码无效或已过期，请重新从官方公众号获取二维码后再试。"),
-            ("TitleServerBlockedError", "舞萌标题服务器拒绝了当前请求，可能是当前 IP 暂时被限制，请稍后再试或更换网络。"),
+            ("TitleServerBlockedError", "舞萌标题服务器拒绝了当前请求，可能是当前网络环境暂时受限，请稍后再试或更换网络。"),
             ("TitleServerNetworkError", "舞萌标题服务器网络请求失败，请稍后再试。"),
-            ("TitleServerError", "舞萌标题服务器请求失败，可能是网络波动或当前 IP 暂时被限制，请稍后再试。"),
+            ("TitleServerError", "舞萌标题服务器请求失败，可能是网络波动或当前网络环境暂时受限，请稍后再试。"),
             ("ArcadeIdentifierError", "官方二维码凭据无效或已过期，请重新从官方公众号获取二维码后再试。"),
             ("ArcadeError", "机台数据源返回异常，可能是二维码过期、官方服务波动或账号状态异常。"),
             ("InvalidPlayerIdentifierError", "水鱼 Import-Token 无效，或水鱼账号不允许导入，请重新绑定 Token。"),

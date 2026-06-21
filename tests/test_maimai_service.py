@@ -292,9 +292,11 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     def test_describe_official_unavailable_mentions_builtin_sgid_path(self):
         service = self.make_service()
         message = service.describe_error(OfficialProtocolUnavailableError("no user id"))
-        self.assertIn("SGID", message)
-        self.assertIn("token/session", message)
-        self.assertIn("chimelib_dll.dll", message)
+        self.assertIn("官方完整成绩链路暂不可用", message)
+        self.assertIn("插件维护者", message)
+        self.assertNotIn("chimelib", message)
+        self.assertNotIn("DLL", message)
+        self.assertNotIn("token/session", message)
 
 
 class VersionTest(unittest.TestCase):

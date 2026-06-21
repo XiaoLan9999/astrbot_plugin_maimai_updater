@@ -29,7 +29,7 @@ class OfficialProtocolTest(unittest.TestCase):
         )
         self.assertEqual(len(obfuscate_api("GetUserMusicApi")), 32)
 
-    def test_sgid_hash_identifier_is_erased_like_chimelib(self):
+    def test_sgid_hash_identifier_is_erased(self):
         sgid = "SGWCMAID260511123456ABCDEF"
         self.assertEqual(erase_sgid_hash_identifier(sgid), "ABCDEF")
 
