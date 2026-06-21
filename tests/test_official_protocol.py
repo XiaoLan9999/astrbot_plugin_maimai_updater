@@ -32,10 +32,14 @@ class OfficialProtocolTest(unittest.TestCase):
         self.assertEqual(resolver.title_key, "SDGB")
 
     def test_official_api_name_and_obfuscation(self):
-        self.assertEqual(official_api_name("GetUserMusicApi"), "MaimaiChnGetUserMusicApi")
+        self.assertEqual(official_api_name("GetUserMusicApi"), "GetUserMusicApiMaimaiChn")
         self.assertEqual(
             obfuscate_api("GetUserMusicApi"),
             obfuscate_api("MaimaiChnGetUserMusicApi"),
+        )
+        self.assertEqual(
+            obfuscate_api("GetUserMusicApi"),
+            obfuscate_api("GetUserMusicApiMaimaiChn"),
         )
         self.assertEqual(len(obfuscate_api("GetUserMusicApi")), 32)
 
@@ -114,6 +118,32 @@ class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[1], ("raise_for_status",))
 
     @unittest.skipIf(importlib.util.find_spec("cryptography") is None, "cryptography not installed")
+    async def test_post_uses_client_id_for_zero_user_agent(self):
+        calls = []
+
+        class FakeResponse:
+            content = encode_request_payload({"ok": True})
+
+            def raise_for_status(self):
+                return None
+
+        class FakeHttpClient:
+            async def post(self, url, *, content, headers):
+                calls.append(headers)
+                return FakeResponse()
+
+        client = OfficialTitleClient(
+            base_url="https://example.test/Maimai2Servlet/",
+            client_id="client-id",
+        )
+        client._client = FakeHttpClient()
+
+        await client.post("GetGameSettingApi", 0, {"placeId": 0, "clientId": "client-id"})
+
+        api_hash = obfuscate_api("GetGameSettingApi")
+        self.assertEqual(calls[0]["User-Agent"], f"{api_hash}#client-id")
+
+    @unittest.skipIf(importlib.util.find_spec("cryptography") is None, "cryptography not installed")
     async def test_post_rejects_empty_official_response(self):
         class FakeResponse:
             content = b""
@@ -176,7 +206,7 @@ class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Cookie", calls[0])
         self.assertEqual(calls[1]["Cookie"], "sid=abc123")
 
-    async def test_get_user_music_and_rating_send_session_token(self):
+    async def test_only_preview_and_login_send_session_token(self):
         calls = []
         client = OfficialTitleClient(
             base_url="https://ignored.example/Maimai2Servlet/",
@@ -190,13 +220,20 @@ class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
             return {"userRating": {"rating": 14370}}
 
         client.post = fake_post
+        await client.get_user_preview(type("Session", (), {"user_id": 123, "token": "session-token"})())
+        await client.user_login(type("Session", (), {"user_id": 123, "token": "session-token"})())
         self.assertEqual(await client.get_user_music(123, token="session-token"), [])
         self.assertEqual(await client.get_user_rating(123, token="session-token"), {"rating": 14370})
 
-        self.assertEqual(calls[0][0], "GetUserMusicApi")
+        self.assertEqual(calls[0][0], "GetUserPreviewApi")
         self.assertEqual(calls[0][2]["token"], "session-token")
-        self.assertEqual(calls[1][0], "GetUserRatingApi")
+        self.assertEqual(calls[0][2]["clientId"], "client-id")
+        self.assertEqual(calls[1][0], "UserLoginApi")
         self.assertEqual(calls[1][2]["token"], "session-token")
+        self.assertEqual(calls[2][0], "GetUserMusicApi")
+        self.assertNotIn("token", calls[2][2])
+        self.assertEqual(calls[3][0], "GetUserRatingApi")
+        self.assertNotIn("token", calls[3][2])
 
 
 if __name__ == "__main__":

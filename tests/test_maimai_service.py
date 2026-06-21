@@ -7,7 +7,6 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from astrbot_plugin_maimai_updater.official_protocol import ChimeSession
 from astrbot_plugin_maimai_updater.maimai_service import (
     MaimaiDependencyError,
     OfficialProtocolUnavailableError,
@@ -114,6 +113,17 @@ class FakeClient:
         self.updated = (identifier, scores, provider)
 
 
+class FakeMaimaiScores:
+    def __init__(self, client):
+        self.client = client
+        self.rating = 0
+
+    async def configure(self, scores):
+        self.scores = list(scores)
+        self.rating = 14370
+        return self
+
+
 class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     def make_service(self, *, fail_players: bool = False, score_source_mode: str = ""):
         service = MaimaiService(
@@ -124,6 +134,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         service._imports = {
             "ArcadeProvider": FakeArcadeProvider,
             "DivingFishProvider": FakeDivingFishProvider,
+            "MaimaiScores": FakeMaimaiScores,
             "PlayerIdentifier": FakeIdentifier,
             "Score": FakeScore,
             "FCType": FakeFCType,
@@ -163,30 +174,21 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_sync_from_sgid_defaults_to_official_full_score_path(self):
         service = self.make_service()
 
-        async def fake_session_from_sgid(sgid: str) -> ChimeSession:
+        async def fake_details_from_sgid(sgid: str):
             service.seen_sgid = sgid
-            return ChimeSession(user_id=24681357, token="session-token")
+            return [
+                {
+                    "musicId": 11026,
+                    "level": 4,
+                    "achievement": 1001481,
+                    "comboStatus": 3,
+                    "syncStatus": 4,
+                    "deluxeScoreMax": 2914,
+                    "playCount": 7,
+                }
+            ]
 
-        async def fake_fetch(session: ChimeSession):
-            service.seen_session = session
-            return (
-                [
-                    {
-                        "musicId": 11026,
-                        "level": 4,
-                        "achievement": 1001481,
-                        "comboStatus": 3,
-                        "syncStatus": 4,
-                        "deluxeScoreMax": 2914,
-                        "playCount": 7,
-                    }
-                ],
-                14370,
-                "https://wq.sys-all.cn/Maimai2Servlet/",
-            )
-
-        service._official_session_from_sgid = fake_session_from_sgid
-        service._fetch_official_details_and_rating = fake_fetch
+        service._official_arcade_details_from_sgid = fake_details_from_sgid
 
         result = await service.sync_from_sgid_to_divingfish(
             sgid="SGWCMAID-test",
@@ -194,8 +196,6 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(service.seen_sgid, "SGWCMAID-test")
-        self.assertEqual(service.seen_session.user_id, 24681357)
-        self.assertEqual(service.seen_session.token, "session-token")
         self.assertFalse(hasattr(service.client, "qrcode_input"))
         self.assertEqual(result.source, "official")
         self.assertEqual(result.score_count, 1)
@@ -242,6 +242,52 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identifier.credentials, "import-token")
         self.assertEqual(scores, [])
         self.assertIsInstance(provider, FakeDivingFishProvider)
+
+    async def test_official_arcade_details_from_sgid_reads_raw_mark_fields(self):
+        service = self.make_service()
+        fake_arcade = types.SimpleNamespace()
+
+        async def fake_get_uid_encrypted(code: str, http_proxy=None):
+            fake_arcade.qr_call = (code, http_proxy)
+            return b"encrypted-credentials"
+
+        async def fake_get_user_scores(credentials: bytes, http_proxy=None):
+            fake_arcade.score_call = (credentials, http_proxy)
+            return [
+                {
+                    "musicId": 11026,
+                    "level": 4,
+                    "achievement": 1001481,
+                    "comboStatus": 3,
+                    "syncStatus": 4,
+                    "dx_score": 2914,
+                }
+            ]
+
+        fake_arcade.get_uid_encrypted = fake_get_uid_encrypted
+        fake_arcade.get_user_scores = fake_get_user_scores
+        fake_pkg = types.ModuleType("maimai_ffi")
+        fake_pkg.arcade = fake_arcade
+        old_pkg = sys.modules.get("maimai_ffi")
+        old_arcade = sys.modules.get("maimai_ffi.arcade")
+        sys.modules["maimai_ffi"] = fake_pkg
+        sys.modules["maimai_ffi.arcade"] = fake_arcade
+        try:
+            details = await service._official_arcade_details_from_sgid("SGWCMAID-test")
+        finally:
+            if old_pkg is None:
+                sys.modules.pop("maimai_ffi", None)
+            else:
+                sys.modules["maimai_ffi"] = old_pkg
+            if old_arcade is None:
+                sys.modules.pop("maimai_ffi.arcade", None)
+            else:
+                sys.modules["maimai_ffi.arcade"] = old_arcade
+
+        self.assertEqual(fake_arcade.qr_call, ("SGWCMAID-test", "http://127.0.0.1:7890"))
+        self.assertEqual(fake_arcade.score_call, (b"encrypted-credentials", "http://127.0.0.1:7890"))
+        self.assertEqual(details[0]["comboStatus"], 3)
+        self.assertEqual(details[0]["syncStatus"], 4)
 
     async def test_official_sgid_resolver_captures_user_id_without_saving_sgid(self):
         service = self.make_service()

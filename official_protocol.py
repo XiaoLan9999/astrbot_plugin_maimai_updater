@@ -15,6 +15,7 @@ from typing import Any
 
 MAI_ENCODING = "1.55"
 API_PREFIX = "MaimaiChn"
+API_SUFFIX = "MaimaiChn"
 OBFUSCATE_PARAM = "8bF76dE9"
 AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
 AES_IV = b"F>;24DjU9W6ZsRH["
@@ -95,7 +96,11 @@ def erase_sgid_hash_identifier(sgid: str, game_id: str = "MAID") -> str:
 
 
 def official_api_name(api: str) -> str:
-    return api if api.startswith(API_PREFIX) else f"{API_PREFIX}{api}"
+    if api.endswith(API_SUFFIX):
+        return api
+    if api.startswith(API_PREFIX):
+        api = api[len(API_PREFIX) :]
+    return f"{api}{API_SUFFIX}"
 
 
 def obfuscate_api(api: str) -> str:
@@ -355,12 +360,13 @@ class OfficialTitleClient:
 
     async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         api_hash = obfuscate_api(api)
+        agent_id = str(int(user_id)) if int(user_id or 0) else self.client_id
         headers = {
             "Content-Type": "application/json",
             "charset": "UTF-8",
             "Mai-Encoding": MAI_ENCODING,
             "Content-Encoding": "deflate",
-            "User-Agent": f"{api_hash}#{int(user_id or 0)}",
+            "User-Agent": f"{api_hash}#{agent_id}",
             "number": "0",
         }
         if self.host_header:
@@ -438,8 +444,6 @@ class OfficialTitleClient:
                 "nextIndex": next_index,
                 "maxCount": int(max_count or 50),
             }
-            if token:
-                payload["token"] = token
             response = await self.post(
                 "GetUserMusicApi",
                 user_id,
@@ -453,8 +457,6 @@ class OfficialTitleClient:
 
     async def get_user_rating(self, user_id: int, *, token: str = "") -> dict[str, Any]:
         payload: dict[str, Any] = {"userId": user_id}
-        if token:
-            payload["token"] = token
         response = await self.post("GetUserRatingApi", user_id, payload)
         return response.get("userRating") or {}
 

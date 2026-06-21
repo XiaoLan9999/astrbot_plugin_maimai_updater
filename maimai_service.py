@@ -86,6 +86,13 @@ def _patch_maimai_current_version(enums_module: Any, maimai_module: Any) -> bool
     return patched
 
 
+def _short_keychip_id(keychip_id: str) -> str:
+    value = (keychip_id or "").strip()
+    if "-" in value:
+        return value.rsplit("-", 1)[-1]
+    return value
+
+
 @dataclass(slots=True)
 class BindResult:
     player_warning: str = ""
@@ -178,6 +185,7 @@ class MaimaiService:
             from maimai_py import exceptions as maimai_exceptions  # type: ignore
             from maimai_py import enums as maimai_enums  # type: ignore
             from maimai_py import maimai as maimai_core  # type: ignore
+            from maimai_py.maimai import MaimaiScores  # type: ignore
             from maimai_py.enums import FCType, FSType, LevelIndex, RateType, SongType  # type: ignore
             from maimai_py.models import Score  # type: ignore
             import httpx
@@ -201,6 +209,7 @@ class MaimaiService:
             "ArcadeProvider": ArcadeProvider,
             "DivingFishProvider": DivingFishProvider,
             "MaimaiClient": MaimaiClient,
+            "MaimaiScores": MaimaiScores,
             "PlayerIdentifier": PlayerIdentifier,
             "Score": Score,
             "FCType": FCType,
@@ -377,6 +386,110 @@ class MaimaiService:
     def _official_fs_type(self, sync_status: int) -> Any:
         return self._enum_by_name(self._load_imports()["FSType"], sync_status_to_fs_name(sync_status))
 
+    @staticmethod
+    def _detail_first_value(detail: dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in detail:
+                return detail.get(key)
+        return None
+
+    @staticmethod
+    def _status_value(value: Any, names: dict[str, int]) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            return int(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+
+        normalized = str(value).strip().lower()
+        return names.get(normalized, 0)
+
+    def _official_combo_status_from_detail(self, detail: dict[str, Any]) -> int:
+        value = self._detail_first_value(
+            detail,
+            "comboStatus",
+            "combo_status",
+            "combo",
+            "fullCombo",
+            "full_combo",
+            "fc",
+        )
+        return self._status_value(
+            value,
+            {
+                "silver": 1,
+                "fc": 1,
+                "fullcombo": 1,
+                "full_combo": 1,
+                "gold": 2,
+                "fcp": 2,
+                "fc+": 2,
+                "fullcomboplus": 2,
+                "allperfect": 3,
+                "ap": 3,
+                "allperfectplus": 4,
+                "app": 4,
+                "ap+": 4,
+                "none": 0,
+                "": 0,
+            },
+        )
+
+    def _official_sync_status_from_detail(self, detail: dict[str, Any]) -> int:
+        value = self._detail_first_value(
+            detail,
+            "syncStatus",
+            "sync_status",
+            "sync",
+            "fullSync",
+            "full_sync",
+            "fs",
+        )
+        return self._status_value(
+            value,
+            {
+                "chainlow": 1,
+                "fs": 1,
+                "fullsync": 1,
+                "chainhi": 2,
+                "fsp": 2,
+                "fs+": 2,
+                "fullsyncplus": 2,
+                "synclow": 3,
+                "fsd": 3,
+                "syncdx": 3,
+                "synchi": 4,
+                "fsdp": 4,
+                "fsd+": 4,
+                "syncdxplus": 4,
+                "syncplay": 5,
+                "sync": 5,
+                "none": 0,
+                "": 0,
+            },
+        )
+
+    @staticmethod
+    def _details_have_mark_fields(details: list[dict[str, Any]]) -> bool:
+        mark_keys = {
+            "comboStatus",
+            "combo_status",
+            "combo",
+            "fullCombo",
+            "full_combo",
+            "fc",
+            "syncStatus",
+            "sync_status",
+            "sync",
+            "fullSync",
+            "full_sync",
+            "fs",
+        }
+        return any(any(key in detail for key in mark_keys) for detail in details)
+
     def _official_level_index(self, music_id: int, level: int) -> Any:
         imports = self._load_imports()
         song_type = imports["SongType"]._from_id(music_id)
@@ -419,12 +532,14 @@ class MaimaiService:
                     level=await self._song_level_text(songs, music_id, song_type, level_index),
                     level_index=level_index,
                     achievements=achievement,
-                    fc=self._official_fc_type(int(detail.get("comboStatus") or 0)),
-                    fs=self._official_fs_type(int(detail.get("syncStatus") or 0)),
+                    fc=self._official_fc_type(self._official_combo_status_from_detail(detail)),
+                    fs=self._official_fs_type(self._official_sync_status_from_detail(detail)),
                     dx_score=int(
                         detail.get("deluxscoreMax")
                         or detail.get("deluxeScoreMax")
+                        or detail.get("deluxScoreMax")
                         or detail.get("dxScore")
+                        or detail.get("dx_score")
                         or 0
                     ),
                     dx_rating=None,
@@ -496,14 +611,42 @@ class MaimaiService:
             return captured_user_ids[0]
         raise OfficialProtocolUnavailableError("official SGID resolver did not expose user_id")
 
+    async def _official_arcade_details_from_sgid(self, sgid: str) -> list[dict[str, Any]]:
+        try:
+            from maimai_ffi import arcade as ffi_arcade  # type: ignore
+        except ImportError as exc:
+            raise MaimaiDependencyError("missing maimai-ffi arcade module") from exc
+
+        encrypted = await ffi_arcade.get_uid_encrypted(str(sgid), http_proxy=self.http_proxy)
+        raw_scores = await ffi_arcade.get_user_scores(encrypted, http_proxy=self.http_proxy)
+        details = [dict(score) for score in raw_scores if isinstance(score, dict)]
+        if not details:
+            raise OfficialTitleServerError("official score source returned no scores")
+        if not self._details_have_mark_fields(details):
+            raise OfficialTitleServerError("official score source did not include full mark fields")
+        return details
+
+    async def _rating_from_score_list(self, scores: list[Any]) -> int:
+        try:
+            maimai_scores = self._load_imports()["MaimaiScores"](self.client)
+            configured = await maimai_scores.configure(scores)
+            return int(getattr(configured, "rating", 0) or 0)
+        except Exception as exc:
+            logger.warning(
+                "[MaimaiUpdater] local rating calculation failed: %s: %s",
+                exc.__class__.__name__,
+                exc,
+                exc_info=True,
+            )
+            return 0
+
     async def _fetch_official_details_and_rating(self, session: ChimeSession) -> tuple[list[dict[str, Any]], int, str]:
         last_error: BaseException | None = None
         for endpoint_index, endpoint in enumerate(DEFAULT_OFFICIAL_TITLE_ENDPOINTS, start=1):
             client = OfficialTitleClient(
                 base_url=endpoint.base_url,
                 client_id=self.official_client_id
-                or self.official_keychip_id
-                or DEFAULT_OFFICIAL_KEYCHIP_ID,
+                or _short_keychip_id(self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID),
                 timeout=self.timeout,
                 http_proxy=self.http_proxy,
                 host_header=endpoint.host_header,
@@ -569,9 +712,9 @@ class MaimaiService:
         raise OfficialTitleServerError("all built-in official title server endpoints failed") from last_error
 
     async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
-        session = await self._official_session_from_sgid(sgid)
-        details, rating, _endpoint = await self._fetch_official_details_and_rating(session)
+        details = await self._official_arcade_details_from_sgid(sgid)
         scores = await self._official_details_to_scores(details)
+        rating = await self._rating_from_score_list(scores)
         await self.client.updates(
             self._identifier(credentials=import_token),
             scores,
