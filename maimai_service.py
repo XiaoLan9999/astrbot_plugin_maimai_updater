@@ -551,8 +551,22 @@ class MaimaiService:
         if isinstance(exc, OfficialProtocolUnavailableError):
             return "官方完整成绩链路暂不可用：无法从本次 SGID 获取官方 userId，或内置标题服候选均请求失败。请重新获取二维码后再试。"
 
+        if isinstance(exc, OfficialTitleServerError) and exc.__cause__ is not None:
+            return self.describe_error(exc.__cause__)
+
         if isinstance(exc, OfficialProtocolError):
             return f"官方完整成绩链路失败：{exc}"
+
+        class_name = exc.__class__.__name__
+        ffi_messages = {
+            "TitleServerBlockedError": "舞萌标题服务器拒绝了当前请求，可能是当前 IP 暂时被限制，请稍后再试或更换网络。",
+            "TitleServerNetworkError": "舞萌标题服务器网络请求失败，请稍后再试。",
+            "TitleServerError": "舞萌标题服务器请求失败，可能是网络波动或当前 IP 暂时被限制，请稍后再试。",
+            "AimeServerError": "二维码无效或已过期，请重新从官方公众号获取二维码后再试。",
+            "ArcadeIdentifierError": "官方二维码凭据无效或已过期，请重新从官方公众号获取二维码后再试。",
+        }
+        if class_name in ffi_messages:
+            return ffi_messages[class_name]
 
         imports = self._imports or {}
         checks = (

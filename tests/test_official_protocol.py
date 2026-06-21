@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 from pathlib import Path
 import unittest
 
@@ -14,6 +15,7 @@ from astrbot_plugin_maimai_updater.official_protocol import (
     erase_sgid_hash_identifier,
     obfuscate_api,
     official_api_name,
+    OfficialTitleClient,
     sync_status_to_fs_name,
 )
 
@@ -54,6 +56,61 @@ class OfficialProtocolTest(unittest.TestCase):
             "maxCount": 50,
         }
         self.assertEqual(decode_response_payload(encode_request_payload(payload)), payload)
+
+
+class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
+    async def test_post_uses_maimai_ffi_request_layer(self):
+        calls = []
+
+        class FakeClientGenerator:
+            def __init__(self, http_proxy=None):
+                calls.append(("generator", http_proxy))
+
+            async def __aenter__(self):
+                calls.append(("enter",))
+                return "fake-client"
+
+            async def __aexit__(self, exc_type, exc, tb):
+                calls.append(("exit", exc_type))
+
+        async def fake_request(api, payload, client, user_id):
+            calls.append(("request", api, payload, client, user_id))
+            return {"ok": True}
+
+        fake_request_module = types.SimpleNamespace(
+            AsyncClientGenerator=FakeClientGenerator,
+            request=fake_request,
+        )
+        fake_pkg = types.ModuleType("maimai_ffi")
+        fake_pkg.request = fake_request_module
+        old_pkg = sys.modules.get("maimai_ffi")
+        old_request = sys.modules.get("maimai_ffi.request")
+        sys.modules["maimai_ffi"] = fake_pkg
+        sys.modules["maimai_ffi.request"] = fake_request_module
+        try:
+            client = OfficialTitleClient(
+                base_url="https://ignored.example/Maimai2Servlet/",
+                client_id="",
+                http_proxy="http://127.0.0.1:7890",
+            )
+            self.assertEqual(
+                await client.post("GetUserRatingApi", 123, {"userId": 123}),
+                {"ok": True},
+            )
+        finally:
+            if old_pkg is None:
+                sys.modules.pop("maimai_ffi", None)
+            else:
+                sys.modules["maimai_ffi"] = old_pkg
+            if old_request is None:
+                sys.modules.pop("maimai_ffi.request", None)
+            else:
+                sys.modules["maimai_ffi.request"] = old_request
+
+        self.assertEqual(calls[0], ("generator", "http://127.0.0.1:7890"))
+        self.assertEqual(calls[1], ("enter",))
+        self.assertEqual(calls[2], ("request", "GetUserRatingApi", {"userId": 123}, "fake-client", 123))
+        self.assertEqual(calls[3], ("exit", None))
 
 
 if __name__ == "__main__":

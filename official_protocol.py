@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-MAI_ENCODING = "1.55"
+MAI_ENCODING = "1.53"
 API_PREFIX = "MaimaiChn"
 OBFUSCATE_PARAM = "8bF76dE9"
 AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
@@ -48,32 +48,9 @@ class OfficialTitleEndpoint:
     verify_tls: bool = True
 
 
-OFFICIAL_TITLE_HOSTS = (
-    "wq.sys-all.cn",
-    "ai.sys-all.cn",
-    "wi.sys-all.cn",
-    "at.sys-all.cn",
-)
-OFFICIAL_TITLE_IP = "43.137.89.146"
-OFFICIAL_TITLE_PATH = "Maimai2Servlet/"
+OFFICIAL_TITLE_BASE_URL = "https://maimai-gm.wahlap.com:42081/Maimai2Servlet/"
 DEFAULT_OFFICIAL_TITLE_ENDPOINTS = (
-    *(OfficialTitleEndpoint(f"https://{host}/{OFFICIAL_TITLE_PATH}") for host in OFFICIAL_TITLE_HOSTS),
-    *(
-        OfficialTitleEndpoint(
-            f"https://{OFFICIAL_TITLE_IP}/{OFFICIAL_TITLE_PATH}",
-            host_header=host,
-            verify_tls=False,
-        )
-        for host in OFFICIAL_TITLE_HOSTS
-    ),
-    *(
-        OfficialTitleEndpoint(
-            f"http://{OFFICIAL_TITLE_IP}/{OFFICIAL_TITLE_PATH}",
-            host_header=host,
-            verify_tls=True,
-        )
-        for host in OFFICIAL_TITLE_HOSTS
-    ),
+    OfficialTitleEndpoint(OFFICIAL_TITLE_BASE_URL),
 )
 
 
@@ -338,30 +315,13 @@ class OfficialTitleClient:
             self._client = None
 
     async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        api_name = official_api_name(api)
-        url = self.base_url + obfuscate_api(api_name)
-        headers = {
-            "Content-Type": "application/json",
-            "charset": "UTF-8",
-            "Mai-Encoding": MAI_ENCODING,
-            "Content-Encoding": "deflate",
-            "User-Agent": f"{obfuscate_api(api_name)}#{user_id or self.client_id}",
-        }
-        if self.host_header:
-            headers["Host"] = self.host_header
-        response = await self._http_client().post(
-            url,
-            content=encode_request_payload(payload),
-            headers=headers,
-        )
-        if response.status_code != 200:
-            raise OfficialTitleServerError(
-                f"official title API {api} failed: HTTP {response.status_code}"
-            )
         try:
-            return decode_response_payload(response.content)
-        except Exception as exc:
-            raise OfficialTitleServerError(f"official title API {api} returned invalid payload") from exc
+            from maimai_ffi import request as ffi_request  # type: ignore
+        except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+            raise OfficialProtocolUnavailableError("maimai-ffi is required for official title protocol") from exc
+
+        async with ffi_request.AsyncClientGenerator(http_proxy=self.http_proxy) as client:
+            return await ffi_request.request(api, payload, client, user_id)
 
     async def get_user_preview(self, session: ChimeSession) -> dict[str, Any]:
         return await self.post(

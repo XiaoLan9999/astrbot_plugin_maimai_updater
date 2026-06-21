@@ -6,6 +6,12 @@
 
 ## 更新日志
 
+### v0.6.5
+
+- 修复标题服 404：官方完整成绩请求改为直接复用 `maimai-ffi.request` 层，由 ffi 构造 Wahlap GM 标题服 URL、API hash、`Mai-Encoding` 与加密载荷。
+- 移除运行时对 `wq/ai/wi/at.sys-all.cn` 与 `43.137.89.146` Host-header 候选的依赖，避免错误入口返回 404。
+- 优化 maimai-ffi 标题服异常的用户提示。
+
 ### v0.6.4
 
 - 修复官方 userId 获取：不再尝试截获 maimai-ffi 的 Fernet 明文，改为复用 ffi 本地解析后的 `GetUserRivalMusicApi` payload 捕获 `userId`，不会发出这次探针请求。
@@ -15,7 +21,7 @@
 
 - 默认更新链路改为官包确认出的官方完整成绩链路：本次 SGID -> 官方 userId -> `GetUserMusicApi` / `GetUserRatingApi` -> 水鱼导入。
 - 成功时会从官方 `comboStatus` / `syncStatus` 转换并导入 FC、AP、FS、FSD 等特殊标识。
-- 内置 `wq/ai/wi/at.sys-all.cn` 与 `43.137.89.146` Host-header 兜底候选，不在面板暴露 MAI ID、Keychip、placeId、serverURLIndex 等官包内部字段。
+- 通过 `maimai-ffi.request` 复用 Wahlap GM 标题服请求层，不在面板暴露 MAI ID、Keychip、placeId、serverURLIndex 等官包内部字段。
 - 仍然不保存 SGID、官方 userId/token 或 MAI 临时会话；每次更新都必须重新提供一次新的 SGID。
 
 ### v0.6.2
@@ -83,7 +89,7 @@
 
 SGID、MAI 临时会话、官方 userId/token 都是一次性信息。插件不会保存这些内容，也不会要求用户在面板里填写 MAI ID、Keychip ID、placeId、serverURLIndex 等官包内部字段。
 
-我用你提供的 pack 包确认过官包内存在 `GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路。插件现在内置这些接口所需的标题服候选地址，并把官方 `comboStatus` / `syncStatus` 转换为水鱼可识别的 FC/FS/AP 等标识；普通用户不需要手动填写官包内部配置。
+我用你提供的 pack 包确认过官包内存在 `GetUserPreviewApi`、`GetUserMusicApi`、`GetUserRatingApi`、`Maimai2Servlet/` 等链路。插件现在通过 `maimai-ffi.request` 复用 Wahlap GM 标题服请求层，并把官方 `comboStatus` / `syncStatus` 转换为水鱼可识别的 FC/FS/AP 等标识；普通用户不需要手动填写官包内部配置。
 
 ## 安全说明
 
