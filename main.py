@@ -37,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.6.11",
+    "0.6.15",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -322,7 +322,7 @@ class MaimaiUpdaterPlugin(Star):
                 "免前缀用法：水鱼状态 / 水鱼绑定 <Token> / "
                 f"{self._prefixless_update_example()}"
             )
-        lines.append("官方 SGID：不保存，每次更新都需要临时提供")
+        lines.append("官方 SGID：每次更新临时提供")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
         if record.rating:
             lines.append(f"Rating：{record.rating}")

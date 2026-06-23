@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from importlib import metadata
+import sys
 from typing import Any
 
 from .official_protocol import (
@@ -43,6 +44,8 @@ SCORE_SOURCE_MODES = {
     SCORE_SOURCE_OFFICIAL_THEN_ARCADE,
 }
 DEFAULT_OFFICIAL_KEYCHIP_ID = "A63E-01E11890000"
+DEFAULT_OFFICIAL_PLACE_ID = 3496
+ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES = {1, 100}
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -89,8 +92,15 @@ def _patch_maimai_current_version(enums_module: Any, maimai_module: Any) -> bool
 def _short_keychip_id(keychip_id: str) -> str:
     value = (keychip_id or "").strip()
     if "-" in value:
-        return value.rsplit("-", 1)[-1]
-    return value
+        return "".join(ch for ch in value.rsplit("-", 1)[-1] if ch.isalnum())
+    return "".join(ch for ch in value if ch.isalnum())
+
+
+def _chime_keychip_id(keychip_id: str) -> str:
+    value = (keychip_id or "").strip()
+    if "-" in value:
+        return "".join(ch for ch in value.rsplit("-", 1)[-1] if ch.isalnum())
+    return "".join(ch for ch in value if ch.isalnum())
 
 
 @dataclass(slots=True)
@@ -120,11 +130,12 @@ class MaimaiService:
         official_title_base_url: str = "",
         official_client_id: str = "",
         official_region_id: int = 8,
-        official_place_id: int = 0,
+        official_place_id: int = DEFAULT_OFFICIAL_PLACE_ID,
         official_server_url_index: int = 0,
         official_keychip_id: str = "",
         official_game_id: str = "MAID",
         official_title_key: str = "SDGB",
+        official_interface_enabled: bool = True,
     ):
         self.timeout = float(timeout or 30.0)
         self.http_proxy = (http_proxy or "").strip() or None
@@ -136,11 +147,12 @@ class MaimaiService:
         self.official_title_base_url = (official_title_base_url or "").strip()
         self.official_client_id = (official_client_id or "").strip()
         self.official_region_id = int(official_region_id or 8)
-        self.official_place_id = int(official_place_id or 0)
+        self.official_place_id = int(official_place_id or DEFAULT_OFFICIAL_PLACE_ID)
         self.official_server_url_index = int(official_server_url_index or 0)
         self.official_keychip_id = (official_keychip_id or "").strip()
         self.official_game_id = (official_game_id or "MAID").strip() or "MAID"
         self.official_title_key = (official_title_key or "SDGB").strip() or "SDGB"
+        self.official_interface_enabled = bool(official_interface_enabled)
         self._ffi_request_lock = asyncio.Lock()
 
     def _ensure_dependency_versions(self) -> None:
@@ -292,6 +304,79 @@ class MaimaiService:
                 return candidate
         return None
 
+    def _official_interface_chimelib_path(self) -> Path | None:
+        configured = self._configured_chimelib_path()
+        if configured is not None:
+            if configured.is_file():
+                return configured
+            raise OfficialProtocolUnavailableError(
+                "official runtime asset is unavailable"
+            )
+
+        bundled = Path(__file__).resolve().parent / "_resources" / "core.dat"
+        if bundled.is_file():
+            return bundled
+        return None
+
+    def _load_official_interface_client_cls(self) -> Any | None:
+        if not self.official_interface_enabled:
+            return None
+        try:
+            from maimai_official_interface import MaimaiOfficialClient  # type: ignore
+            return MaimaiOfficialClient
+        except (ImportError, AttributeError):
+            pass
+
+        plugin_dir = Path(__file__).resolve().parent
+        vendored_init = plugin_dir / "maimai_official_interface" / "__init__.py"
+        if vendored_init.is_file():
+            plugin_dir_text = str(plugin_dir)
+            if plugin_dir_text not in sys.path:
+                sys.path.insert(0, plugin_dir_text)
+            sys.modules.pop("maimai_official_interface", None)
+            try:
+                from maimai_official_interface import MaimaiOfficialClient  # type: ignore
+                return MaimaiOfficialClient
+            except (ImportError, AttributeError):
+                pass
+
+        for parent in (plugin_dir.parent, *plugin_dir.parents):
+            repo_root = parent / "maimai_official_interface"
+            package_init = repo_root / "maimai_official_interface" / "__init__.py"
+            if not package_init.is_file():
+                continue
+            repo_root_text = str(repo_root)
+            if repo_root_text not in sys.path:
+                sys.path.insert(0, repo_root_text)
+            sys.modules.pop("maimai_official_interface", None)
+            try:
+                from maimai_official_interface import MaimaiOfficialClient  # type: ignore
+                return MaimaiOfficialClient
+            except (ImportError, AttributeError):
+                continue
+        return None
+
+    def _official_interface_client(self) -> Any | None:
+        client_cls = self._load_official_interface_client_cls()
+        if client_cls is None:
+            return None
+
+        chimelib_path = self._official_interface_chimelib_path()
+        kwargs: dict[str, Any] = {
+            "keychip_id": self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID,
+            "region_id": self.official_region_id,
+            "place_id": self.official_place_id,
+            "game_id": self.official_game_id or "MAID",
+            "qr_game_id": "MAID",
+            "title_key": self.official_title_key or "SDGB",
+            "server_url_index": self.official_server_url_index,
+            "timeout": self.timeout,
+            "http_proxy": self.http_proxy,
+        }
+        if chimelib_path is not None:
+            kwargs["chimelib_path"] = chimelib_path
+        return client_cls(**kwargs)
+
     async def _official_session_from_sgid(self, sgid: str) -> ChimeSession:
         dll_path = self._find_chimelib_dll_path()
         if dll_path is None:
@@ -303,7 +388,7 @@ class MaimaiService:
             dll_path=str(dll_path),
             game_id=self.official_game_id or "MAID",
             qr_game_id="MAID",
-            chip_id=self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID,
+            chip_id=_chime_keychip_id(self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID),
             title_key=self.official_title_key or "SDGB",
             server_url_index=self.official_server_url_index,
             timeout=self.timeout,
@@ -492,10 +577,11 @@ class MaimaiService:
 
     def _official_level_index(self, music_id: int, level: int) -> Any:
         imports = self._load_imports()
-        song_type = imports["SongType"]._from_id(music_id)
-        if song_type == imports["SongType"].UTAGE:
-            return music_id
-        return imports["LevelIndex"](int(level or 0))
+        LevelIndex = imports["LevelIndex"]
+        try:
+            return LevelIndex(int(level or 0))
+        except (TypeError, ValueError):
+            return getattr(LevelIndex, "BASIC", LevelIndex(0))
 
     async def _song_level_text(self, songs: Any, music_id: int, song_type: Any, level_index: Any) -> str:
         try:
@@ -566,16 +652,19 @@ class MaimaiService:
     def _extract_official_rating(value: Any) -> int:
         if not isinstance(value, dict):
             return 0
-        for key in ("rating", "playerRating", "totalRating"):
+        for key in ("rating", "playerRating", "musicRating", "totalRating"):
             try:
                 rating = int(value.get(key) or 0)
             except (TypeError, ValueError):
                 rating = 0
             if rating > 0:
                 return rating
-        nested = value.get("userRating")
-        if isinstance(nested, dict):
-            return MaimaiService._extract_official_rating(nested)
+        for nested_key in ("userData", "userRating"):
+            nested = value.get(nested_key)
+            if isinstance(nested, dict):
+                rating = MaimaiService._extract_official_rating(nested)
+                if rating > 0:
+                    return rating
         return 0
 
     async def _official_user_id_from_sgid(self, sgid: str) -> int:
@@ -641,9 +730,12 @@ class MaimaiService:
             return 0
 
     async def _fetch_official_details_and_rating(self, session: ChimeSession) -> tuple[list[dict[str, Any]], int, str]:
+        if not DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
+            raise OfficialProtocolUnavailableError("official title endpoint has not been resolved")
+
         last_error: BaseException | None = None
         for endpoint_index, endpoint in enumerate(DEFAULT_OFFICIAL_TITLE_ENDPOINTS, start=1):
-            client = OfficialTitleClient(
+            settings_client = OfficialTitleClient(
                 base_url=endpoint.base_url,
                 client_id=self.official_client_id
                 or _short_keychip_id(self.official_keychip_id or DEFAULT_OFFICIAL_KEYCHIP_ID),
@@ -652,11 +744,28 @@ class MaimaiService:
                 host_header=endpoint.host_header,
                 verify_tls=endpoint.verify_tls,
             )
+            client: OfficialTitleClient | None = None
+            login_date_time = 0
             try:
+                runtime_base_url = await settings_client.resolve_runtime_base_url(
+                    place_id=self.official_place_id,
+                )
+                client = (
+                    settings_client
+                    if runtime_base_url == settings_client.base_url
+                    else settings_client.with_base_url(runtime_base_url)
+                )
                 preview_data: dict[str, Any] = {}
                 try:
                     preview_data = await client.get_user_preview(session)
+                    preview_error_id = int(preview_data.get("errorId") or 0)
+                    if preview_error_id != 0:
+                        raise OfficialTitleServerError(
+                            f"official one-time session preview rejected: error_id={preview_error_id}"
+                        )
                 except Exception as exc:
+                    if isinstance(exc, OfficialTitleServerError):
+                        raise
                     logger.warning(
                         "[MaimaiUpdater] official preview fetch failed via endpoint #%s: %s: %s",
                         endpoint_index,
@@ -666,12 +775,20 @@ class MaimaiService:
                     )
 
                 try:
-                    await client.user_login(
+                    login_data = await client.user_login(
                         session,
                         region_id=self.official_region_id,
                         place_id=self.official_place_id,
                     )
+                    login_return_code = int(login_data.get("returnCode") or 0)
+                    if login_return_code not in ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES:
+                        raise OfficialTitleServerError(
+                            f"official one-time session login rejected: return_code={login_return_code}"
+                        )
+                    login_date_time = int(login_data.get("_loginDateTime") or login_data.get("loginDateTime") or 0)
                 except Exception as exc:
+                    if isinstance(exc, OfficialTitleServerError):
+                        raise
                     logger.warning(
                         "[MaimaiUpdater] official login request failed via endpoint #%s: %s: %s",
                         endpoint_index,
@@ -680,6 +797,17 @@ class MaimaiService:
                         exc_info=True,
                     )
 
+                try:
+                    user_data = await client.get_user_data(session.user_id, token=session.token)
+                except Exception as exc:
+                    logger.warning(
+                        "[MaimaiUpdater] official user data fetch failed via endpoint #%s: %s: %s",
+                        endpoint_index,
+                        exc.__class__.__name__,
+                        exc,
+                        exc_info=True,
+                    )
+                    user_data = {}
                 details = await client.get_user_music(session.user_id, token=session.token)
                 try:
                     rating_data = await client.get_user_rating(session.user_id, token=session.token)
@@ -696,8 +824,12 @@ class MaimaiService:
                     "[MaimaiUpdater] official title fetch succeeded via endpoint #%s",
                     endpoint_index,
                 )
-                rating = self._extract_official_rating(rating_data) or self._extract_official_rating(preview_data)
-                return details, rating, endpoint.base_url
+                rating = (
+                    self._extract_official_rating(user_data)
+                    or self._extract_official_rating(rating_data)
+                    or self._extract_official_rating(preview_data)
+                )
+                return details, rating, runtime_base_url
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -708,13 +840,61 @@ class MaimaiService:
                     exc_info=True,
                 )
             finally:
-                await client.close()
+                if client is not None and login_date_time:
+                    try:
+                        await client.user_logout(
+                            session.user_id,
+                            login_date_time=login_date_time,
+                            logout_type=5,
+                            region_id=self.official_region_id,
+                            place_id=self.official_place_id,
+                        )
+                    except Exception:
+                        pass
+                if client is not None and client is not settings_client:
+                    await client.close()
+                await settings_client.close()
         raise OfficialTitleServerError("all built-in official title server endpoints failed") from last_error
 
+    async def _fetch_official_interface_details_and_rating(self, sgid: str) -> tuple[list[dict[str, Any]], int, str]:
+        client = self._official_interface_client()
+        if client is None:
+            raise OfficialProtocolUnavailableError("official interface package is unavailable")
+
+        result = await client.fetch_from_sgid(sgid)
+        details = [
+            dict(detail)
+            for detail in getattr(result, "music_details", []) or []
+            if isinstance(detail, dict)
+        ]
+        if not details:
+            raise OfficialTitleServerError("official score source returned no scores")
+        if not self._details_have_mark_fields(details):
+            raise OfficialTitleServerError("official score source did not include full mark fields")
+
+        rating = int(getattr(result, "rating", 0) or 0)
+        endpoint = str(getattr(result, "endpoint", "") or "")
+        logger.info(
+            "[MaimaiUpdater] official interface fetch succeeded: scores=%s marked=%s",
+            len(details),
+            sum(1 for detail in details if self._official_combo_status_from_detail(detail) or self._official_sync_status_from_detail(detail)),
+        )
+        return details, rating, endpoint
+
     async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
-        details = await self._official_arcade_details_from_sgid(sgid)
+        if self._load_official_interface_client_cls() is not None:
+            details, rating, _endpoint = await self._fetch_official_interface_details_and_rating(sgid)
+        else:
+            if not DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
+                raise OfficialProtocolUnavailableError("official title endpoint has not been resolved")
+
+            session = await self._official_session_from_sgid(sgid)
+            details, rating, _endpoint = await self._fetch_official_details_and_rating(session)
+        if not self._details_have_mark_fields(details):
+            raise OfficialTitleServerError("official title score response did not include full mark fields")
         scores = await self._official_details_to_scores(details)
-        rating = await self._rating_from_score_list(scores)
+        if not rating:
+            rating = await self._rating_from_score_list(scores)
         await self.client.updates(
             self._identifier(credentials=import_token),
             scores,
@@ -797,6 +977,14 @@ class MaimaiService:
                 return f"{exc} 原始错误：SyntaxError: {root.msg} ({file_name}, line {root.lineno})"
             return str(exc)
 
+        class_name = exc.__class__.__name__
+        if class_name in {"OfficialProtocolUnavailableError", "OfficialTitleServerError"}:
+            return "官方完整成绩链路暂不可用，请稍后再试；若持续失败请联系插件维护者更新运行环境。"
+        if class_name == "ChimeSessionError":
+            return "官方完整成绩链路暂不可用，请重新获取二维码后再试；若持续失败请联系插件维护者。"
+        if class_name == "OfficialProtocolError":
+            return "官方完整成绩链路失败，请稍后再试；若持续失败请联系插件维护者。"
+
         if isinstance(exc, OfficialProtocolUnavailableError):
             return "官方完整成绩链路暂不可用，请稍后再试；若持续失败请联系插件维护者更新运行环境。"
 
@@ -809,7 +997,6 @@ class MaimaiService:
         if isinstance(exc, OfficialProtocolError):
             return "官方完整成绩链路失败，请稍后再试；若持续失败请联系插件维护者。"
 
-        class_name = exc.__class__.__name__
         ffi_messages = {
             "TitleServerBlockedError": "舞萌标题服务器拒绝了当前请求，可能是当前网络环境暂时受限，请稍后再试或更换网络。",
             "TitleServerNetworkError": "舞萌标题服务器网络请求失败，请稍后再试。",

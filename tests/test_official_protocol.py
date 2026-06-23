@@ -71,12 +71,11 @@ class OfficialProtocolTest(unittest.TestCase):
         }
         self.assertEqual(decode_response_payload(encode_request_payload(payload)), payload)
 
-    def test_default_title_endpoints_include_current_title_paths(self):
-        base_urls = [endpoint.base_url for endpoint in DEFAULT_OFFICIAL_TITLE_ENDPOINTS]
-
-        self.assertTrue(any("/SDGB/" in base_url for base_url in base_urls))
-        self.assertTrue(any("/MAID/" in base_url for base_url in base_urls))
-        self.assertFalse(any("maimai-gm" in base_url for base_url in base_urls))
+    def test_default_title_endpoint_points_to_game_setting_entry(self):
+        self.assertTrue(DEFAULT_OFFICIAL_TITLE_ENDPOINTS)
+        self.assertTrue(
+            DEFAULT_OFFICIAL_TITLE_ENDPOINTS[0].base_url.endswith("/Maimai2Servlet/")
+        )
 
 
 class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
@@ -224,6 +223,7 @@ class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
         await client.user_login(type("Session", (), {"user_id": 123, "token": "session-token"})())
         self.assertEqual(await client.get_user_music(123, token="session-token"), [])
         self.assertEqual(await client.get_user_rating(123, token="session-token"), {"rating": 14370})
+        await client.user_logout(123, login_date_time=1782183759, region_id=8, place_id=3496)
 
         self.assertEqual(calls[0][0], "GetUserPreviewApi")
         self.assertEqual(calls[0][2]["token"], "session-token")
@@ -231,9 +231,49 @@ class OfficialTitleClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[1][0], "UserLoginApi")
         self.assertEqual(calls[1][2]["token"], "session-token")
         self.assertEqual(calls[2][0], "GetUserMusicApi")
+        self.assertEqual(calls[2][2], {"userId": 123, "nextIndex": 0, "maxCount": 50})
         self.assertNotIn("token", calls[2][2])
         self.assertEqual(calls[3][0], "GetUserRatingApi")
         self.assertNotIn("token", calls[3][2])
+        self.assertEqual(calls[4][0], "UserLogoutApi")
+        self.assertEqual(calls[4][2]["loginDateTime"], 1782183759)
+        self.assertEqual(calls[4][2]["type"], 5)
+
+    async def test_resolve_runtime_base_url_uses_movie_server_uri(self):
+        client = OfficialTitleClient(
+            base_url="https://example.test/Maimai2Servlet/",
+            client_id="client-id",
+        )
+
+        async def fake_post(api, user_id, payload):
+            self.assertEqual(api, "GetGameSettingApi")
+            self.assertEqual(user_id, 0)
+            self.assertEqual(payload, {"placeId": 3496, "clientId": "client-id"})
+            return {"gameSetting": {"movieServerUri": "runtime/"}}
+
+        client.post = fake_post
+
+        self.assertEqual(
+            await client.resolve_runtime_base_url(place_id=3496),
+            "https://example.test/Maimai2Servlet/runtime/",
+        )
+
+    async def test_resolve_runtime_base_url_uses_builtin_runtime_when_setting_is_blank(self):
+        client = OfficialTitleClient(
+            base_url="https://example.test/Maimai2Servlet/",
+            client_id="client-id",
+        )
+
+        async def fake_post(api, user_id, payload):
+            self.assertEqual(api, "GetGameSettingApi")
+            return {"gameSetting": {"movieServerUri": ""}}
+
+        client.post = fake_post
+
+        self.assertNotEqual(
+            await client.resolve_runtime_base_url(place_id=3496),
+            "https://example.test/Maimai2Servlet/",
+        )
 
 
 if __name__ == "__main__":

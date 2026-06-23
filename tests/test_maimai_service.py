@@ -8,12 +8,15 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from astrbot_plugin_maimai_updater.maimai_service import (
+    ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES,
     MaimaiDependencyError,
     OfficialProtocolUnavailableError,
     MaimaiService,
     _is_version_at_least,
     _patch_maimai_current_version,
 )
+import astrbot_plugin_maimai_updater.maimai_service as maimai_service_module
+from astrbot_plugin_maimai_updater.official_protocol import ChimeSession, OfficialTitleEndpoint
 
 
 class FakeIdentifier:
@@ -54,7 +57,9 @@ class FakeFSType:
 
 
 class FakeLevelIndex(int):
-    pass
+    @property
+    def value(self):
+        return int(self)
 
 
 class FakeRateType:
@@ -125,11 +130,18 @@ class FakeMaimaiScores:
 
 
 class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
-    def make_service(self, *, fail_players: bool = False, score_source_mode: str = ""):
+    def make_service(
+        self,
+        *,
+        fail_players: bool = False,
+        score_source_mode: str = "",
+        official_interface_enabled: bool = False,
+    ):
         service = MaimaiService(
             timeout=1,
             http_proxy="http://127.0.0.1:7890",
             score_source_mode=score_source_mode,
+            official_interface_enabled=official_interface_enabled,
         )
         service._imports = {
             "ArcadeProvider": FakeArcadeProvider,
@@ -163,6 +175,39 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(MaimaiService(official_game_id="").official_game_id, "MAID")
         self.assertEqual(MaimaiService(official_title_key="").official_title_key, "SDGB")
 
+    def test_login_return_code_100_can_continue_read_flow(self):
+        self.assertIn(1, ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES)
+        self.assertIn(100, ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES)
+
+    async def test_official_session_uses_chime_keychip_tail(self):
+        captured = {}
+
+        class FakeResolver:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            async def resolve_async(self, sgid):
+                return ChimeSession(user_id=123, token="session-token")
+
+        original = maimai_service_module.ChimeSessionResolver
+        maimai_service_module.ChimeSessionResolver = FakeResolver
+        try:
+            service = MaimaiService(official_chimelib_dll_path=__file__)
+            session = await service._official_session_from_sgid("SGWCMAID-test")
+        finally:
+            maimai_service_module.ChimeSessionResolver = original
+
+        self.assertEqual(session.user_id, 123)
+        self.assertEqual(captured["chip_id"], "01E11890000")
+
+    def test_extract_official_rating_prefers_current_user_data_shape(self):
+        self.assertEqual(
+            MaimaiService._extract_official_rating(
+                {"userData": {"playerRating": 10207, "highestRating": 13984}}
+            ),
+            10207,
+        )
+
     async def test_bind_from_sgid_only_validates_qrcode(self):
         service = self.make_service()
         result = await service.bind_from_sgid("SGWCMAID-test")
@@ -173,9 +218,17 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_sync_from_sgid_defaults_to_official_full_score_path(self):
         service = self.make_service()
+        old_endpoints = maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS
+        maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = (
+            OfficialTitleEndpoint("https://example.test/Maimai2Servlet/SDGB/"),
+        )
 
-        async def fake_details_from_sgid(sgid: str):
+        async def fake_session_from_sgid(sgid: str):
             service.seen_sgid = sgid
+            return ChimeSession(user_id=12345678, token="session-token")
+
+        async def fake_details_and_rating(session: ChimeSession):
+            service.seen_session = session
             return [
                 {
                     "musicId": 11026,
@@ -186,16 +239,21 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
                     "deluxeScoreMax": 2914,
                     "playCount": 7,
                 }
-            ]
+            ], 14370, "https://example.test/Maimai2Servlet/SDGB/"
 
-        service._official_arcade_details_from_sgid = fake_details_from_sgid
+        service._official_session_from_sgid = fake_session_from_sgid
+        service._fetch_official_details_and_rating = fake_details_and_rating
 
-        result = await service.sync_from_sgid_to_divingfish(
-            sgid="SGWCMAID-test",
-            import_token="import-token",
-        )
+        try:
+            result = await service.sync_from_sgid_to_divingfish(
+                sgid="SGWCMAID-test",
+                import_token="import-token",
+            )
+        finally:
+            maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = old_endpoints
 
         self.assertEqual(service.seen_sgid, "SGWCMAID-test")
+        self.assertEqual(service.seen_session.user_id, 12345678)
         self.assertFalse(hasattr(service.client, "qrcode_input"))
         self.assertEqual(result.source, "official")
         self.assertEqual(result.score_count, 1)
@@ -211,6 +269,92 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scores[0].fs, "FSDP")
         self.assertEqual(scores[0].dx_score, 2914)
         self.assertEqual(scores[0].level, "14+")
+
+    async def test_official_utage_scores_keep_enum_level_index(self):
+        service = self.make_service()
+        scores = await service._official_details_to_scores(
+            [
+                {
+                    "musicId": 100001,
+                    "level": 4,
+                    "achievement": 1000000,
+                    "comboStatus": 1,
+                    "syncStatus": 0,
+                    "deluxeScoreMax": 100,
+                }
+            ]
+        )
+
+        self.assertEqual(scores[0].id, 100001)
+        self.assertEqual(scores[0].type, FakeSongType.UTAGE)
+        self.assertTrue(hasattr(scores[0].level_index, "value"))
+        self.assertEqual(scores[0].level_index.value, 4)
+
+    async def test_sync_from_sgid_prefers_custom_official_interface(self):
+        service = self.make_service(official_interface_enabled=True)
+        captured = {}
+
+        class FakeOfficialResult:
+            rating = 14370
+            endpoint = "https://example.test/runtime/"
+            music_details = [
+                {
+                    "musicId": 11026,
+                    "level": 4,
+                    "achievement": 1001481,
+                    "comboStatus": 3,
+                    "syncStatus": 4,
+                    "deluxeScoreMax": 2914,
+                    "playCount": 7,
+                }
+            ]
+
+        class FakeOfficialClient:
+            def __init__(self, **kwargs):
+                captured["kwargs"] = kwargs
+
+            async def fetch_from_sgid(self, sgid):
+                captured["sgid"] = sgid
+                return FakeOfficialResult()
+
+        service._load_official_interface_client_cls = lambda: FakeOfficialClient
+
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
+            import_token="import-token",
+        )
+
+        self.assertEqual(captured["sgid"], "SGWCMAID-test")
+        self.assertEqual(captured["kwargs"]["http_proxy"], "http://127.0.0.1:7890")
+        self.assertFalse(hasattr(service.client, "qrcode_input"))
+        self.assertEqual(result.source, "official")
+        self.assertEqual(result.score_count, 1)
+        self.assertEqual(result.rating, 14370)
+        self.assertEqual(result.marked_score_count, 1)
+        identifier, scores, provider = service.client.updated
+        self.assertEqual(identifier.credentials, "import-token")
+        self.assertIsInstance(provider, FakeDivingFishProvider)
+        self.assertEqual(scores[0].fc, "AP")
+        self.assertEqual(scores[0].fs, "FSDP")
+
+    async def test_sync_from_sgid_does_not_consume_sgid_without_title_endpoint(self):
+        service = self.make_service()
+        old_endpoints = maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS
+        maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = ()
+
+        async def fail_session_from_sgid(sgid: str):
+            raise AssertionError("SGID should not be consumed before title endpoint is resolved")
+
+        service._official_session_from_sgid = fail_session_from_sgid
+
+        try:
+            with self.assertRaises(OfficialProtocolUnavailableError):
+                await service.sync_from_sgid_to_divingfish(
+                    sgid="SGWCMAID-test",
+                    import_token="import-token",
+                )
+        finally:
+            maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = old_endpoints
 
     async def test_sync_from_sgid_to_divingfish_uses_arcade_scores_when_explicit(self):
         service = self.make_service(score_source_mode="arcade")

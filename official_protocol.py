@@ -11,12 +11,14 @@ from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 
 MAI_ENCODING = "1.55"
 API_PREFIX = "MaimaiChn"
 API_SUFFIX = "MaimaiChn"
 OBFUSCATE_PARAM = "8bF76dE9"
+DEFAULT_RUNTIME_SERVER_URI = "mE2s3Jhd/"
 AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
 AES_IV = b"F>;24DjU9W6ZsRH["
 
@@ -50,26 +52,8 @@ class OfficialTitleEndpoint:
     verify_tls: bool = True
 
 
-OFFICIAL_TITLE_SERVER_HOSTS = ("wq", "ai", "wi", "at")
-OFFICIAL_TITLE_SERVER_IP = "43.137.89.146"
-OFFICIAL_TITLE_BASE_URL = f"https://{OFFICIAL_TITLE_SERVER_IP}:42081/Maimai2Servlet/SDGB/"
-DEFAULT_OFFICIAL_TITLE_ENDPOINTS = (
-    *(
-        OfficialTitleEndpoint(
-            f"https://{OFFICIAL_TITLE_SERVER_IP}:42081/Maimai2Servlet/SDGB/",
-            host_header=f"{host}.sys-all.cn",
-            verify_tls=False,
-        )
-        for host in OFFICIAL_TITLE_SERVER_HOSTS
-    ),
-    *(
-        OfficialTitleEndpoint(
-            f"https://{OFFICIAL_TITLE_SERVER_IP}:42081/Maimai2Servlet/MAID/",
-            host_header=f"{host}.sys-all.cn",
-            verify_tls=False,
-        )
-        for host in OFFICIAL_TITLE_SERVER_HOSTS
-    ),
+DEFAULT_OFFICIAL_TITLE_ENDPOINTS: tuple[OfficialTitleEndpoint, ...] = (
+    OfficialTitleEndpoint("https://maimai-gm.wahlap.com:42081/Maimai2Servlet/"),
 )
 
 
@@ -299,6 +283,70 @@ class ChimeSessionResolver:
         return await asyncio.to_thread(self.resolve, sgid)
 
 
+class _RuntimePathClient:
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        base_url: str,
+        host_header: str = "",
+        cookies: dict[str, str] | None = None,
+    ) -> None:
+        self.inner = inner
+        self.base_url = base_url.rstrip("/") + "/"
+        self.host_header = (host_header or "").strip()
+        self.cookies = cookies if cookies is not None else {}
+
+    def _rewrite_url(self, url: str) -> str:
+        api_hash = str(url).rstrip("/").rsplit("/", 1)[-1]
+        if not api_hash:
+            return str(url)
+        return f"{self.base_url}{api_hash}"
+
+    async def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        headers = kwargs.get("headers")
+        if isinstance(headers, dict):
+            headers = dict(headers)
+            headers.setdefault("number", "0")
+            if self.host_header:
+                headers["Host"] = self.host_header
+            if self.cookies:
+                headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in self.cookies.items())
+            kwargs["headers"] = headers
+        response = await self.inner.request(method, self._rewrite_url(str(url)), **kwargs)
+        self._store_response_cookies(response)
+        return response
+
+    def _store_response_cookies(self, response: Any) -> None:
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return
+
+        raw_values: list[str] = []
+        get_list = getattr(headers, "get_list", None)
+        if get_list:
+            raw_values.extend(str(value) for value in get_list("set-cookie"))
+        get = getattr(headers, "get", None)
+        if get:
+            value = get("set-cookie")
+            if value:
+                raw_values.append(str(value))
+        if not raw_values:
+            try:
+                for key, value in headers:
+                    key_text = key.decode("ascii", errors="ignore") if isinstance(key, bytes) else str(key)
+                    if key_text.lower() == "set-cookie":
+                        raw_values.append(value.decode("latin1") if isinstance(value, bytes) else str(value))
+            except Exception:
+                pass
+
+        for raw_value in raw_values:
+            cookie = SimpleCookie()
+            cookie.load(raw_value)
+            for key, morsel in cookie.items():
+                self.cookies[key] = morsel.value
+
+
 class OfficialTitleClient:
     def __init__(
         self,
@@ -320,6 +368,8 @@ class OfficialTitleClient:
         self.verify_tls = bool(verify_tls)
         self._client: Any | None = None
         self._cookies: dict[str, str] = {}
+        self._ffi_pool_context: Any | None = None
+        self._ffi_pool: Any | None = None
 
     def _http_client(self) -> Any:
         if self._client is not None:
@@ -339,6 +389,10 @@ class OfficialTitleClient:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        if self._ffi_pool_context is not None:
+            await self._ffi_pool_context.__aexit__(None, None, None)
+            self._ffi_pool_context = None
+            self._ffi_pool = None
 
     def _cookie_header(self) -> str:
         return "; ".join(f"{key}={value}" for key, value in self._cookies.items())
@@ -359,6 +413,25 @@ class OfficialTitleClient:
                 self._cookies[key] = morsel.value
 
     async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._client is None:
+            try:
+                from maimai_ffi import request as ffi_request  # type: ignore
+            except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+                raise OfficialProtocolUnavailableError(
+                    "maimai-ffi is required for official title protocol"
+                ) from exc
+
+            if self._ffi_pool is None:
+                self._ffi_pool_context = ffi_request.AsyncClientGenerator(self.http_proxy)
+                self._ffi_pool = await self._ffi_pool_context.__aenter__()
+            client = _RuntimePathClient(
+                self._ffi_pool,
+                base_url=self.base_url,
+                host_header=self.host_header,
+                cookies=self._cookies,
+            )
+            return await ffi_request.request(api, payload, client, int(user_id or 0))
+
         api_hash = obfuscate_api(api)
         agent_id = str(int(user_id)) if int(user_id or 0) else self.client_id
         headers = {
@@ -402,6 +475,34 @@ class OfficialTitleClient:
             },
         )
 
+    async def get_game_setting(self, *, place_id: int = 0) -> dict[str, Any]:
+        return await self.post(
+            "GetGameSettingApi",
+            0,
+            {
+                "placeId": int(place_id or 0),
+                "clientId": self.client_id,
+            },
+        )
+
+    async def resolve_runtime_base_url(self, *, place_id: int = 0) -> str:
+        response = await self.get_game_setting(place_id=place_id)
+        game_setting = response.get("gameSetting") or {}
+        movie_server_uri = str(game_setting.get("movieServerUri") or "").strip()
+        if not movie_server_uri:
+            movie_server_uri = DEFAULT_RUNTIME_SERVER_URI
+        return urljoin(self.base_url, movie_server_uri)
+
+    def with_base_url(self, base_url: str) -> "OfficialTitleClient":
+        return OfficialTitleClient(
+            base_url=base_url,
+            client_id=self.client_id,
+            timeout=self.timeout,
+            http_proxy=self.http_proxy,
+            host_header=self.host_header,
+            verify_tls=self.verify_tls,
+        )
+
     async def user_login(
         self,
         session: ChimeSession,
@@ -412,7 +513,7 @@ class OfficialTitleClient:
         generic_flag: int = 0,
     ) -> dict[str, Any]:
         now = int(time.time())
-        return await self.post(
+        response = await self.post(
             "UserLoginApi",
             session.user_id,
             {
@@ -426,6 +527,32 @@ class OfficialTitleClient:
                 "isContinue": False,
                 "genericFlag": int(generic_flag or 0),
                 "token": session.token,
+            },
+        )
+        response.setdefault("_loginDateTime", now)
+        return response
+
+    async def user_logout(
+        self,
+        user_id: int,
+        *,
+        login_date_time: int = 0,
+        logout_type: int = 5,
+        access_code: str = "",
+        region_id: int = 8,
+        place_id: int = 0,
+    ) -> dict[str, Any]:
+        return await self.post(
+            "UserLogoutApi",
+            int(user_id or 0),
+            {
+                "userId": int(user_id or 0),
+                "accessCode": access_code or "",
+                "regionId": int(region_id or 0),
+                "placeId": int(place_id or 0),
+                "clientId": self.client_id,
+                "loginDateTime": int(login_date_time or 0),
+                "type": int(logout_type or 5),
             },
         )
 
@@ -459,6 +586,11 @@ class OfficialTitleClient:
         payload: dict[str, Any] = {"userId": user_id}
         response = await self.post("GetUserRatingApi", user_id, payload)
         return response.get("userRating") or {}
+
+    async def get_user_data(self, user_id: int, *, token: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"userId": user_id}
+        response = await self.post("GetUserDataApi", user_id, payload)
+        return response.get("userData") or {}
 
     async def get_user_charge(self, user_id: int, *, token: str = "") -> list[dict[str, Any]]:
         payload: dict[str, Any] = {"userId": user_id}

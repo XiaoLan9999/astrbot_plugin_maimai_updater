@@ -1,19 +1,19 @@
 {
   "require_command_prefix": {
     "description": "需要唤醒前缀",
-    "hint": "开启后只响应带 Bot 唤醒前缀的 AstrBot 命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件所有命令都可以直接发送，例如 水鱼状态、水鱼绑定 <Token>、绑定水鱼 <Token>、更新水鱼 SGWCMAID...。裸 SGID 仍不会触发。",
+    "hint": "开启后只响应带 Bot 唤醒前缀的命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件命令可直接发送，例如 水鱼状态、水鱼绑定 <Token>、绑定水鱼 <Token>、更新水鱼 SGWCMAID...。裸 SGID 不会触发。",
     "type": "bool",
     "default": true
   },
   "enable_clear_command": {
     "description": "启用清空水鱼命令",
-    "hint": "启用后可使用 maimaiclear 确认清空 / 清空水鱼 确认清空 / 清空b50 确认清空 向水鱼发送清空成绩请求，用于误用他人 SGID 导致成绩污染后的手动处理。",
+    "hint": "启用后可使用 maimaiclear 确认清空 / 清空水鱼 确认清空 / 清空b50 确认清空 向水鱼发送清空成绩请求。",
     "type": "bool",
     "default": true
   },
   "sgid_max_age_seconds": {
     "description": "SGID 最大有效时间",
-    "hint": "根据 SGID 内嵌时间戳判断是否过期。超过该秒数会拒绝使用，避免复用旧二维码导致失败或影响玩家正常登录。",
+    "hint": "根据 SGID 内嵌时间戳判断是否过期，默认只接受 180 秒内生成的 SGID。",
     "type": "int",
     "slider": {
       "min": 60,
@@ -24,7 +24,7 @@
   },
   "request_timeout_seconds": {
     "description": "网络请求超时时间",
-    "hint": "请求舞萌官方标题服和水鱼接口的超时时间。",
+    "hint": "请求官方数据源和水鱼接口的超时时间。",
     "type": "int",
     "slider": {
       "min": 5,
@@ -47,7 +47,7 @@
   },
   "warn_unsupported_recall": {
     "description": "撤回提示",
-    "hint": "群聊收到 SGID 或水鱼 Token 后，会单独发送“已尝试撤回消息，如果没撤回请手动撤回”的安全提示。私聊不会撤回。",
+    "hint": "群聊收到 SGID 或水鱼 Token 后，会单独发送“已尝试撤回消息，如果没撤回请手动撤回”。私聊不会撤回。",
     "type": "bool",
     "default": true
   }
