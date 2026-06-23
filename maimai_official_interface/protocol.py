@@ -1,0 +1,559 @@
+from __future__ import annotations
+
+import asyncio
+import ctypes
+import hashlib
+import json
+import os
+import time
+import zlib
+from dataclasses import dataclass
+from http.cookies import SimpleCookie
+from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin
+
+
+MAI_ENCODING = "1.55"
+API_PREFIX = "MaimaiChn"
+API_SUFFIX = "MaimaiChn"
+OBFUSCATE_PARAM = "8bF76dE9"
+DEFAULT_RUNTIME_SERVER_URI = "mE2s3Jhd/"
+AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
+AES_IV = b"F>;24DjU9W6ZsRH["
+
+
+class OfficialProtocolError(RuntimeError):
+    pass
+
+
+class OfficialProtocolUnavailableError(OfficialProtocolError):
+    pass
+
+
+class ChimeSessionError(OfficialProtocolError):
+    pass
+
+
+class OfficialTitleServerError(OfficialProtocolError):
+    pass
+
+
+@dataclass(slots=True)
+class ChimeSession:
+    user_id: int
+    token: str
+
+
+@dataclass(frozen=True, slots=True)
+class OfficialTitleEndpoint:
+    base_url: str
+    host_header: str = ""
+    verify_tls: bool = True
+
+
+DEFAULT_OFFICIAL_TITLE_ENDPOINTS: tuple[OfficialTitleEndpoint, ...] = (
+    OfficialTitleEndpoint("https://maimai-gm.wahlap.com:42081/Maimai2Servlet/"),
+)
+
+
+def is_official_sgid(sgid: str, game_id: str = "MAID") -> bool:
+    value = (sgid or "").strip()
+    return value.startswith("SGWC") and value[4:8] == game_id and len(value) > 20
+
+
+def erase_sgid_hash_identifier(sgid: str, game_id: str = "MAID") -> str:
+    value = (sgid or "").strip()
+    if not is_official_sgid(value, game_id=game_id):
+        raise ChimeSessionError("invalid SGID format for official chime API")
+    return value[20:]
+
+
+def official_api_name(api: str) -> str:
+    if api.endswith(API_SUFFIX):
+        return api
+    if api.startswith(API_PREFIX):
+        api = api[len(API_PREFIX) :]
+    return f"{api}{API_SUFFIX}"
+
+
+def obfuscate_api(api: str) -> str:
+    source = f"{official_api_name(api)}{OBFUSCATE_PARAM}".encode("utf-8")
+    return hashlib.md5(source).hexdigest()
+
+
+def _aes_cipher():
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+        raise OfficialProtocolUnavailableError(
+            "cryptography is required for the official title protocol"
+        ) from exc
+    return Cipher(algorithms.AES(AES_KEY), modes.CBC(AES_IV))
+
+
+def _pkcs7_pad(data: bytes) -> bytes:
+    try:
+        from cryptography.hazmat.primitives import padding
+    except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+        raise OfficialProtocolUnavailableError(
+            "cryptography is required for the official title protocol"
+        ) from exc
+    padder = padding.PKCS7(128).padder()
+    return padder.update(data) + padder.finalize()
+
+
+def _pkcs7_unpad(data: bytes) -> bytes:
+    try:
+        from cryptography.hazmat.primitives import padding
+    except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+        raise OfficialProtocolUnavailableError(
+            "cryptography is required for the official title protocol"
+        ) from exc
+    unpadder = padding.PKCS7(128).unpadder()
+    return unpadder.update(data) + unpadder.finalize()
+
+
+def aes_encrypt(data: bytes) -> bytes:
+    encryptor = _aes_cipher().encryptor()
+    return encryptor.update(_pkcs7_pad(data)) + encryptor.finalize()
+
+
+def aes_decrypt(data: bytes) -> bytes:
+    decryptor = _aes_cipher().decryptor()
+    return _pkcs7_unpad(decryptor.update(data) + decryptor.finalize())
+
+
+def zlib_wrap_raw_deflate(data: bytes) -> bytes:
+    compressor = zlib.compressobj(level=zlib.Z_DEFAULT_COMPRESSION, wbits=-15)
+    compressed = compressor.compress(data) + compressor.flush()
+    checksum = zlib.adler32(data) & 0xFFFFFFFF
+    return b"\x78\x9c" + compressed + checksum.to_bytes(4, "big")
+
+
+def zlib_unwrap_raw_deflate(data: bytes) -> bytes:
+    if len(data) < 6:
+        return b""
+    return zlib.decompress(data[2:-4], wbits=-15)
+
+
+def encode_request_payload(payload: dict[str, Any]) -> bytes:
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return aes_encrypt(zlib_wrap_raw_deflate(body))
+
+
+def decode_response_payload(payload: bytes) -> dict[str, Any]:
+    body = zlib_unwrap_raw_deflate(aes_decrypt(payload))
+    if not body:
+        return {}
+    return json.loads(body.decode("utf-8"))
+
+
+def combo_status_to_fc_name(combo_status: int) -> str | None:
+    return {
+        1: "FC",
+        2: "FCP",
+        3: "AP",
+        4: "APP",
+    }.get(int(combo_status or 0))
+
+
+def sync_status_to_fs_name(sync_status: int) -> str | None:
+    # Official enum names:
+    # SyncPlay -> normal SYNC, ChainLow/Hi -> FS/FSP, SyncLow/Hi -> FSD/FSDP.
+    return {
+        5: "SYNC",
+        1: "FS",
+        2: "FSP",
+        3: "FSD",
+        4: "FSDP",
+    }.get(int(sync_status or 0))
+
+
+class ChimeSessionResolver:
+    def __init__(
+        self,
+        *,
+        dll_path: str,
+        game_id: str = "MAID",
+        qr_game_id: str = "MAID",
+        chip_id: str = "",
+        common_key: str = "",
+        title_key: str = "SDGB",
+        server_url_index: int = 0,
+        timeout: float = 20.0,
+        poll_interval: float = 0.05,
+    ) -> None:
+        self.dll_path = Path(dll_path).expanduser()
+        self.game_id = game_id or "MAID"
+        self.qr_game_id = qr_game_id or "MAID"
+        self.chip_id = chip_id or ""
+        self.common_key = common_key or ""
+        self.title_key = title_key or "SDGB"
+        self.server_url_index = int(server_url_index or 0)
+        self.timeout = float(timeout or 20.0)
+        self.poll_interval = float(poll_interval or 0.05)
+        self._dll: Any | None = None
+        self._dll_dir_handle: Any | None = None
+
+    def _load(self) -> Any:
+        if self._dll is not None:
+            return self._dll
+        if os.name != "nt":
+            raise OfficialProtocolUnavailableError("official runtime is not supported in this environment")
+        if not self.dll_path.is_file():
+            raise OfficialProtocolUnavailableError("official runtime asset is unavailable")
+
+        if hasattr(os, "add_dll_directory"):
+            self._dll_dir_handle = os.add_dll_directory(str(self.dll_path.parent))
+
+        dll = ctypes.CDLL(str(self.dll_path))
+        dll.CCommGetUserData_Create.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_uint64,
+        ]
+        dll.CCommGetUserData_Create.restype = ctypes.c_void_p
+        dll.CCommGetUserData_Destroy.argtypes = [ctypes.c_void_p]
+        dll.CCommGetUserData_Destroy.restype = ctypes.c_bool
+        dll.CCommGetUserData_execute.argtypes = [ctypes.c_void_p]
+        dll.CCommGetUserData_execute.restype = None
+        dll.CCommGetUserData_getErrorID.argtypes = [ctypes.c_void_p]
+        dll.CCommGetUserData_getErrorID.restype = ctypes.c_int
+        dll.CCommGetUserData_isEnd.argtypes = [ctypes.c_void_p]
+        dll.CCommGetUserData_isEnd.restype = ctypes.c_bool
+        dll.CCommGetUserData_getUserID.argtypes = [ctypes.c_void_p]
+        dll.CCommGetUserData_getUserID.restype = ctypes.c_uint32
+        dll.CCommGetUserData_getToken.argtypes = [ctypes.c_void_p]
+        dll.CCommGetUserData_getToken.restype = ctypes.c_char_p
+        self._dll = dll
+        return dll
+
+    def resolve(self, sgid: str) -> ChimeSession:
+        dll = self._load()
+        qr_data = erase_sgid_hash_identifier(sgid, game_id=self.qr_game_id)
+        handle = dll.CCommGetUserData_Create(
+            self.game_id,
+            self.chip_id,
+            self.common_key,
+            qr_data,
+            self.title_key,
+            self.server_url_index,
+        )
+        if not handle:
+            raise ChimeSessionError("failed to create official chime session")
+
+        try:
+            deadline = time.monotonic() + self.timeout
+            while time.monotonic() < deadline:
+                dll.CCommGetUserData_execute(handle)
+                if dll.CCommGetUserData_isEnd(handle):
+                    break
+                time.sleep(self.poll_interval)
+            else:
+                raise ChimeSessionError("official chime session timed out")
+
+            error_id = int(dll.CCommGetUserData_getErrorID(handle))
+            if error_id != 0:
+                raise ChimeSessionError(f"official session failed: error_id={error_id}")
+
+            user_id = int(dll.CCommGetUserData_getUserID(handle))
+            token_bytes = dll.CCommGetUserData_getToken(handle) or b""
+            token = token_bytes.decode("ascii", errors="ignore")
+            if not user_id or not token:
+                raise ChimeSessionError("official chime session returned empty user_id or token")
+            return ChimeSession(user_id=user_id, token=token)
+        finally:
+            dll.CCommGetUserData_Destroy(handle)
+
+    async def resolve_async(self, sgid: str) -> ChimeSession:
+        return await asyncio.to_thread(self.resolve, sgid)
+
+
+class _RuntimePathClient:
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        base_url: str,
+        host_header: str = "",
+        cookies: dict[str, str] | None = None,
+    ) -> None:
+        self.inner = inner
+        self.base_url = base_url.rstrip("/") + "/"
+        self.host_header = (host_header or "").strip()
+        self.cookies = cookies if cookies is not None else {}
+
+    def _rewrite_url(self, url: str) -> str:
+        api_hash = str(url).rstrip("/").rsplit("/", 1)[-1]
+        if not api_hash:
+            return str(url)
+        return f"{self.base_url}{api_hash}"
+
+    async def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        headers = kwargs.get("headers")
+        if isinstance(headers, dict):
+            headers = dict(headers)
+            headers.setdefault("number", "0")
+            if self.host_header:
+                headers["Host"] = self.host_header
+            if self.cookies:
+                headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in self.cookies.items())
+            kwargs["headers"] = headers
+        response = await self.inner.request(method, self._rewrite_url(str(url)), **kwargs)
+        self._store_response_cookies(response)
+        return response
+
+    def _store_response_cookies(self, response: Any) -> None:
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return
+
+        raw_values: list[str] = []
+        get_list = getattr(headers, "get_list", None)
+        if get_list:
+            raw_values.extend(str(value) for value in get_list("set-cookie"))
+        get = getattr(headers, "get", None)
+        if get:
+            value = get("set-cookie")
+            if value:
+                raw_values.append(str(value))
+        if not raw_values:
+            try:
+                for key, value in headers:
+                    key_text = key.decode("ascii", errors="ignore") if isinstance(key, bytes) else str(key)
+                    if key_text.lower() == "set-cookie":
+                        raw_values.append(value.decode("latin1") if isinstance(value, bytes) else str(value))
+            except Exception:
+                pass
+
+        for raw_value in raw_values:
+            cookie = SimpleCookie()
+            cookie.load(raw_value)
+            for key, morsel in cookie.items():
+                self.cookies[key] = morsel.value
+
+
+class OfficialTitleClient:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        client_id: str,
+        timeout: float = 30.0,
+        http_proxy: str | None = None,
+        host_header: str = "",
+        verify_tls: bool = True,
+    ) -> None:
+        if not base_url:
+            raise OfficialProtocolUnavailableError("official title base URL is not configured")
+        self.base_url = base_url.rstrip("/") + "/"
+        self.client_id = client_id or ""
+        self.timeout = float(timeout or 30.0)
+        self.http_proxy = (http_proxy or "").strip() or None
+        self.host_header = (host_header or "").strip()
+        self.verify_tls = bool(verify_tls)
+        self._client: Any | None = None
+        self._cookies: dict[str, str] = {}
+        self._ffi_pool_context: Any | None = None
+        self._ffi_pool: Any | None = None
+
+    def _http_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        try:
+            import httpx
+        except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+            raise OfficialProtocolUnavailableError("httpx is required for official title protocol") from exc
+
+        kwargs: dict[str, Any] = {"timeout": self.timeout, "verify": self.verify_tls}
+        if self.http_proxy:
+            kwargs["proxy"] = self.http_proxy
+        self._client = httpx.AsyncClient(**kwargs)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+        if self._ffi_pool_context is not None:
+            await self._ffi_pool_context.__aexit__(None, None, None)
+            self._ffi_pool_context = None
+            self._ffi_pool = None
+
+    def _cookie_header(self) -> str:
+        return "; ".join(f"{key}={value}" for key, value in self._cookies.items())
+
+    def _store_response_cookies(self, response: Any) -> None:
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return
+        get_list = getattr(headers, "get_list", None)
+        raw_values = get_list("set-cookie") if get_list else []
+        if not raw_values:
+            raw_value = headers.get("set-cookie") if hasattr(headers, "get") else ""
+            raw_values = [raw_value] if raw_value else []
+        for raw_value in raw_values:
+            cookie = SimpleCookie()
+            cookie.load(raw_value)
+            for key, morsel in cookie.items():
+                self._cookies[key] = morsel.value
+
+    async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._client is None:
+            try:
+                from maimai_ffi import request as ffi_request  # type: ignore
+            except ImportError as exc:  # pragma: no cover - depends on deployed deps.
+                raise OfficialProtocolUnavailableError(
+                    "maimai-ffi is required for official title protocol"
+                ) from exc
+
+            if self._ffi_pool is None:
+                self._ffi_pool_context = ffi_request.AsyncClientGenerator(self.http_proxy)
+                self._ffi_pool = await self._ffi_pool_context.__aenter__()
+            client = _RuntimePathClient(
+                self._ffi_pool,
+                base_url=self.base_url,
+                host_header=self.host_header,
+                cookies=self._cookies,
+            )
+            return await ffi_request.request(api, payload, client, int(user_id or 0))
+
+        api_hash = obfuscate_api(api)
+        agent_id = str(int(user_id)) if int(user_id or 0) else self.client_id
+        headers = {
+            "Content-Type": "application/json",
+            "charset": "UTF-8",
+            "Mai-Encoding": MAI_ENCODING,
+            "Content-Encoding": "deflate",
+            "User-Agent": f"{api_hash}#{agent_id}",
+            "number": "0",
+        }
+        if self.host_header:
+            headers["Host"] = self.host_header
+        cookie_header = self._cookie_header()
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+
+        client = self._http_client()
+        response = await client.post(
+            f"{self.base_url}{api_hash}",
+            content=encode_request_payload(payload),
+            headers=headers,
+        )
+        response.raise_for_status()
+        self._store_response_cookies(response)
+        if not response.content:
+            raise OfficialTitleServerError("empty official title response")
+        try:
+            return decode_response_payload(response.content)
+        except Exception as exc:
+            raise OfficialTitleServerError("invalid official title response") from exc
+
+    async def get_user_preview(self, session: ChimeSession) -> dict[str, Any]:
+        return await self.post(
+            "GetUserPreviewApi",
+            session.user_id,
+            {
+                "userId": session.user_id,
+                "segaIdAuthKey": "",
+                "token": session.token,
+                "clientId": self.client_id,
+            },
+        )
+
+    async def get_game_setting(self, *, place_id: int = 0) -> dict[str, Any]:
+        return await self.post(
+            "GetGameSettingApi",
+            0,
+            {
+                "placeId": int(place_id or 0),
+                "clientId": self.client_id,
+            },
+        )
+
+    async def resolve_runtime_base_url(self, *, place_id: int = 0) -> str:
+        response = await self.get_game_setting(place_id=place_id)
+        game_setting = response.get("gameSetting") or {}
+        movie_server_uri = str(game_setting.get("movieServerUri") or "").strip()
+        if not movie_server_uri:
+            movie_server_uri = DEFAULT_RUNTIME_SERVER_URI
+        return urljoin(self.base_url, movie_server_uri)
+
+    def with_base_url(self, base_url: str) -> "OfficialTitleClient":
+        return OfficialTitleClient(
+            base_url=base_url,
+            client_id=self.client_id,
+            timeout=self.timeout,
+            http_proxy=self.http_proxy,
+            host_header=self.host_header,
+            verify_tls=self.verify_tls,
+        )
+
+    async def user_login(
+        self,
+        session: ChimeSession,
+        *,
+        access_code: str = "",
+        region_id: int = 8,
+        place_id: int = 0,
+        generic_flag: int = 0,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        response = await self.post(
+            "UserLoginApi",
+            session.user_id,
+            {
+                "userId": session.user_id,
+                "accessCode": access_code or "",
+                "regionId": int(region_id or 0),
+                "placeId": int(place_id or 0),
+                "clientId": self.client_id,
+                "dateTime": now,
+                "loginDateTime": now,
+                "isContinue": False,
+                "genericFlag": int(generic_flag or 0),
+                "token": session.token,
+            },
+        )
+        response.setdefault("_loginDateTime", now)
+        return response
+
+    async def get_user_music(
+        self,
+        user_id: int,
+        *,
+        token: str = "",
+        max_count: int = 50,
+    ) -> list[dict[str, Any]]:
+        details: list[dict[str, Any]] = []
+        next_index = 0
+        while True:
+            payload: dict[str, Any] = {
+                "userId": user_id,
+                "nextIndex": next_index,
+                "maxCount": int(max_count or 50),
+            }
+            response = await self.post(
+                "GetUserMusicApi",
+                user_id,
+                payload,
+            )
+            for music in response.get("userMusicList") or []:
+                details.extend(music.get("userMusicDetailList") or [])
+            next_index = int(response.get("nextIndex") or 0)
+            if next_index == 0:
+                return details
+
+    async def get_user_rating(self, user_id: int, *, token: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"userId": user_id}
+        response = await self.post("GetUserRatingApi", user_id, payload)
+        return response.get("userRating") or {}
+
+    async def get_user_data(self, user_id: int, *, token: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"userId": user_id}
+        response = await self.post("GetUserDataApi", user_id, payload)
+        return response.get("userData") or {}
