@@ -23,6 +23,14 @@ AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
 AES_IV = b"F>;24DjU9W6ZsRH["
 
 
+def _free_windows_library(handle: int) -> None:
+    if os.name != "nt" or not handle:
+        return
+    import _ctypes
+
+    _ctypes.FreeLibrary(handle)
+
+
 class OfficialProtocolError(RuntimeError):
     pass
 
@@ -214,49 +222,67 @@ class ChimeSessionResolver:
         if not self.dll_path.is_file():
             raise OfficialProtocolUnavailableError("official runtime asset is unavailable")
 
-        if hasattr(os, "add_dll_directory"):
-            self._dll_dir_handle = os.add_dll_directory(str(self.dll_path.parent))
+        try:
+            if hasattr(os, "add_dll_directory"):
+                self._dll_dir_handle = os.add_dll_directory(str(self.dll_path.parent))
 
-        dll = ctypes.CDLL(str(self.dll_path))
-        dll.CCommGetUserData_Create.argtypes = [
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
-            ctypes.c_uint64,
-        ]
-        dll.CCommGetUserData_Create.restype = ctypes.c_void_p
-        dll.CCommGetUserData_Destroy.argtypes = [ctypes.c_void_p]
-        dll.CCommGetUserData_Destroy.restype = ctypes.c_bool
-        dll.CCommGetUserData_execute.argtypes = [ctypes.c_void_p]
-        dll.CCommGetUserData_execute.restype = None
-        dll.CCommGetUserData_getErrorID.argtypes = [ctypes.c_void_p]
-        dll.CCommGetUserData_getErrorID.restype = ctypes.c_int
-        dll.CCommGetUserData_isEnd.argtypes = [ctypes.c_void_p]
-        dll.CCommGetUserData_isEnd.restype = ctypes.c_bool
-        dll.CCommGetUserData_getUserID.argtypes = [ctypes.c_void_p]
-        dll.CCommGetUserData_getUserID.restype = ctypes.c_uint32
-        dll.CCommGetUserData_getToken.argtypes = [ctypes.c_void_p]
-        dll.CCommGetUserData_getToken.restype = ctypes.c_char_p
-        self._dll = dll
-        return dll
+            dll = ctypes.CDLL(str(self.dll_path))
+            self._dll = dll
+            dll.CCommGetUserData_Create.argtypes = [
+                ctypes.c_wchar_p,
+                ctypes.c_wchar_p,
+                ctypes.c_wchar_p,
+                ctypes.c_wchar_p,
+                ctypes.c_wchar_p,
+                ctypes.c_uint64,
+            ]
+            dll.CCommGetUserData_Create.restype = ctypes.c_void_p
+            dll.CCommGetUserData_Destroy.argtypes = [ctypes.c_void_p]
+            dll.CCommGetUserData_Destroy.restype = ctypes.c_bool
+            dll.CCommGetUserData_execute.argtypes = [ctypes.c_void_p]
+            dll.CCommGetUserData_execute.restype = None
+            dll.CCommGetUserData_getErrorID.argtypes = [ctypes.c_void_p]
+            dll.CCommGetUserData_getErrorID.restype = ctypes.c_int
+            dll.CCommGetUserData_isEnd.argtypes = [ctypes.c_void_p]
+            dll.CCommGetUserData_isEnd.restype = ctypes.c_bool
+            dll.CCommGetUserData_getUserID.argtypes = [ctypes.c_void_p]
+            dll.CCommGetUserData_getUserID.restype = ctypes.c_uint32
+            dll.CCommGetUserData_getToken.argtypes = [ctypes.c_void_p]
+            dll.CCommGetUserData_getToken.restype = ctypes.c_char_p
+            return dll
+        except Exception:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        dll = self._dll
+        dll_dir_handle = self._dll_dir_handle
+        self._dll = None
+        self._dll_dir_handle = None
+        try:
+            if dll is not None:
+                _free_windows_library(int(getattr(dll, "_handle", 0) or 0))
+        finally:
+            if dll_dir_handle is not None:
+                dll_dir_handle.close()
 
     def resolve(self, sgid: str) -> ChimeSession:
-        dll = self._load()
-        qr_data = erase_sgid_hash_identifier(sgid, game_id=self.qr_game_id)
-        handle = dll.CCommGetUserData_Create(
-            self.game_id,
-            self.chip_id,
-            self.common_key,
-            qr_data,
-            self.title_key,
-            self.server_url_index,
-        )
-        if not handle:
-            raise ChimeSessionError("failed to create official chime session")
-
+        dll = None
+        handle = None
         try:
+            dll = self._load()
+            qr_data = erase_sgid_hash_identifier(sgid, game_id=self.qr_game_id)
+            handle = dll.CCommGetUserData_Create(
+                self.game_id,
+                self.chip_id,
+                self.common_key,
+                qr_data,
+                self.title_key,
+                self.server_url_index,
+            )
+            if not handle:
+                raise ChimeSessionError("failed to create official chime session")
+
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 dll.CCommGetUserData_execute(handle)
@@ -277,7 +303,11 @@ class ChimeSessionResolver:
                 raise ChimeSessionError("official chime session returned empty user_id or token")
             return ChimeSession(user_id=user_id, token=token)
         finally:
-            dll.CCommGetUserData_Destroy(handle)
+            try:
+                if dll is not None and handle:
+                    dll.CCommGetUserData_Destroy(handle)
+            finally:
+                self.close()
 
     async def resolve_async(self, sgid: str) -> ChimeSession:
         return await asyncio.to_thread(self.resolve, sgid)

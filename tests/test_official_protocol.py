@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from astrbot_plugin_maimai_updater import official_protocol as protocol_module
 from astrbot_plugin_maimai_updater.official_protocol import (
     DEFAULT_OFFICIAL_TITLE_ENDPOINTS,
     MAI_ENCODING,
@@ -24,6 +25,25 @@ from astrbot_plugin_maimai_updater.official_protocol import (
 
 
 class OfficialProtocolTest(unittest.TestCase):
+    def test_chime_resolver_releases_runtime_handle(self):
+        released = []
+
+        class FakeDll:
+            _handle = 24680
+
+        resolver = ChimeSessionResolver(dll_path=__file__)
+        resolver._dll = FakeDll()
+        original = protocol_module._free_windows_library
+        protocol_module._free_windows_library = released.append
+        try:
+            resolver.close()
+            resolver.close()
+        finally:
+            protocol_module._free_windows_library = original
+
+        self.assertEqual(released, [24680])
+        self.assertIsNone(resolver._dll)
+
     def test_chime_session_default_game_ids(self):
         resolver = ChimeSessionResolver(dll_path=__file__)
 
