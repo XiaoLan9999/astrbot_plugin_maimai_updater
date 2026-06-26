@@ -6,10 +6,20 @@
 
 ## 更新日志
 
+### v0.6.26
+
+- 修复当前版本下官方成绩读取失败的问题，更新水鱼时继续保留 FC / FS / AP / SYNC 等特殊标识。
+- 精简公开说明，隐藏插件内部实现细节。
+
+### v0.6.18 - v0.6.25
+
+- 连续修复当前官方流程兼容性问题。
+- 每次 SGID 更新结束后释放运行时资源，避免 Windows 持续占用本插件文件。
+
 ### v0.6.17
 
-- 每次 SGID 解析结束后显式卸载运行时资源，避免 Windows 持续占用 `core.dat`。
-- 成功、失败和会话创建异常路径都会执行清理，插件更新或卸载无需等待 AstrBot 退出。
+- 每次 SGID 解析结束后显式释放插件资源，避免 Windows 下更新或卸载插件时被占用。
+- 成功、失败和会话创建异常路径都会执行清理。
 
 ### v0.6.16
 
@@ -22,15 +32,13 @@
 
 ### v0.6.14
 
-- 按官包真实联网流程接入标题服：先请求 `GetGameSettingApi` 获取运行时入口，再读取 `GetUserMusicApi`。
-- 水鱼更新改为使用 `GetUserMusicApi` 的 `comboStatus` / `syncStatus` 写入 FC、FC+、AP、AP+、FS、FS+、FSD、FSD+、SYNC。
-- Rating 优先使用 `GetUserDataApi` 返回的当前版本 `playerRating` / `musicRating`，避免继续显示旧版本 Rating。
+- 更新水鱼时改为读取完整官方成绩字段，保留 FC、FC+、AP、AP+、FS、FS+、FSD、FSD+、SYNC。
+- Rating 优先使用当前官方数据，避免显示旧版本 Rating。
 
 ### v0.6.13
 
-- 停用 v0.6.12 中基于 `maimai_ffi.arcade` 原始成绩补 FC/FS/AP 的错误路径：该数据源实际只返回基础成绩，不包含完整标识字段。
-- 确认完整标识应来自官包标题服 `GetUserMusicApi` 返回的 `comboStatus` / `syncStatus`。
-- 暂停内置静态标题服地址猜测，后续改为按官包启动链路解析标题服入口。
+- 停用基础成绩链路补全特殊标识的错误路径。
+- 改为只在能读取完整字段时写入特殊标识。
 - 修正插件注册版本与市场元数据版本不一致的问题。
 
 ### v0.6.12
@@ -79,14 +87,9 @@
 
 ## 当前数据链路
 
-稳定可用的 maimai.py ArcadeProvider 链路只能提供基础成绩；它不会返回 FC、FS、AP 等特殊标识。
+插件会通过本次 SGID 读取完整官方成绩字段，并写入水鱼 Import-Token 对应账号。
 
-官包内完整成绩字段位于标题服 `GetUserMusicApi` 响应中：
-
-- `comboStatus`：FC / FC+ / AP / AP+
-- `syncStatus`：FS / FS+ / FSD / FSD+ / SYNC
-
-插件会按官包实际启动链路解析标题服入口，而不是使用旧的基础成绩链路补全标识。
+更新后的水鱼数据会保留 FC / FS / AP / SYNC 等特殊标识；不会用基础成绩链路猜测或补全这些标识。
 
 ## 运行环境
 

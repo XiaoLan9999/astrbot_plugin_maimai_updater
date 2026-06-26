@@ -51,6 +51,7 @@ class OfficialSessionHandle:
         login: dict[str, Any],
         region_id: int = DEFAULT_REGION_ID,
         place_id: int = DEFAULT_PLACE_ID,
+        cabinet_client_id: str = "",
     ) -> None:
         self.session = session
         self.client = client
@@ -59,6 +60,7 @@ class OfficialSessionHandle:
         self.login = login
         self.region_id = int(region_id or DEFAULT_REGION_ID)
         self.place_id = int(place_id or DEFAULT_PLACE_ID)
+        self.cabinet_client_id = (cabinet_client_id or client.client_id).strip()
         self._closed = False
         self._logged_out = False
 
@@ -95,7 +97,7 @@ class OfficialSessionHandle:
                 "accessCode": "",
                 "regionId": self.region_id,
                 "placeId": self.place_id,
-                "clientId": self.client.client_id,
+                "clientId": self.cabinet_client_id,
                 "loginDateTime": int(login_date_time or 0),
                 "type": int(logout_type or 5),
             },
@@ -131,6 +133,10 @@ def _keychip_tail(keychip_id: str) -> str:
     if "-" in value:
         return _compact_keychip_id(value.rsplit("-", 1)[-1])
     return _compact_keychip_id(value)
+
+
+def _client_id_from_keychip(keychip_id: str) -> str:
+    return _compact_keychip_id(keychip_id)[:11]
 
 
 def _extract_rating(value: Any) -> int:
@@ -182,7 +188,11 @@ class MaimaiOfficialClient:
 
     @property
     def client_id(self) -> str:
-        return _keychip_tail(self.keychip_id)
+        return _client_id_from_keychip(self.keychip_id)
+
+    @property
+    def cabinet_client_id(self) -> str:
+        return _client_id_from_keychip(self.keychip_id)
 
     async def resolve_session_async(self, sgid: str) -> ChimeSession:
         if not self.chimelib_path.is_file():
@@ -191,7 +201,7 @@ class MaimaiOfficialClient:
             dll_path=str(self.chimelib_path),
             game_id=self.game_id,
             qr_game_id=self.qr_game_id,
-            chip_id=_keychip_tail(self.keychip_id),
+            chip_id=self.client_id,
             title_key=self.title_key,
             server_url_index=self.server_url_index,
             timeout=self.timeout,
@@ -253,7 +263,12 @@ class MaimaiOfficialClient:
                 if preview_error_id != 0:
                     raise OfficialTitleServerError(f"preview rejected: error_id={preview_error_id}")
 
-                login = await client.user_login(session, region_id=self.region_id, place_id=self.place_id)
+                login = await client.user_login(
+                    session,
+                    region_id=self.region_id,
+                    place_id=self.place_id,
+                    client_id=self.cabinet_client_id,
+                )
                 login_return_code = int(login.get("returnCode") or 0)
                 if login_return_code not in ACCEPTED_LOGIN_RETURN_CODES:
                     raise OfficialTitleServerError(f"login rejected: return_code={login_return_code}")
@@ -266,6 +281,7 @@ class MaimaiOfficialClient:
                     login=login,
                     region_id=self.region_id,
                     place_id=self.place_id,
+                    cabinet_client_id=self.cabinet_client_id,
                 )
                 if client is not settings_client:
                     await settings_client.close()
@@ -278,4 +294,6 @@ class MaimaiOfficialClient:
             finally:
                 if not returning_handle:
                     await settings_client.close()
+        if isinstance(last_error, OfficialTitleServerError):
+            raise last_error
         raise OfficialTitleServerError("all official endpoints failed") from last_error

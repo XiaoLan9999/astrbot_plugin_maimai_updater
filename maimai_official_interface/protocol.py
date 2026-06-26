@@ -19,6 +19,8 @@ API_PREFIX = "MaimaiChn"
 API_SUFFIX = "MaimaiChn"
 OBFUSCATE_PARAM = "8bF76dE9"
 DEFAULT_RUNTIME_SERVER_URI = "mE2s3Jhd/"
+AUTH_TIME_OFFSET_SECONDS = 60 * 60
+CABINET_TIME_OFFSET_SECONDS = 8 * 60 * 60
 AES_KEY = b"FKM2JX:VjZNK6hc:A0<JU:i5oR7LA]9W"
 AES_IV = b"F>;24DjU9W6ZsRH["
 
@@ -433,25 +435,6 @@ class OfficialTitleClient:
                 self._cookies[key] = morsel.value
 
     async def post(self, api: str, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._client is None:
-            try:
-                from maimai_ffi import request as ffi_request  # type: ignore
-            except ImportError as exc:  # pragma: no cover - depends on deployed deps.
-                raise OfficialProtocolUnavailableError(
-                    "maimai-ffi is required for official title protocol"
-                ) from exc
-
-            if self._ffi_pool is None:
-                self._ffi_pool_context = ffi_request.AsyncClientGenerator(self.http_proxy)
-                self._ffi_pool = await self._ffi_pool_context.__aenter__()
-            client = _RuntimePathClient(
-                self._ffi_pool,
-                base_url=self.base_url,
-                host_header=self.host_header,
-                cookies=self._cookies,
-            )
-            return await ffi_request.request(api, payload, client, int(user_id or 0))
-
         api_hash = obfuscate_api(api)
         agent_id = str(int(user_id)) if int(user_id or 0) else self.client_id
         headers = {
@@ -461,6 +444,8 @@ class OfficialTitleClient:
             "Content-Encoding": "deflate",
             "User-Agent": f"{api_hash}#{agent_id}",
             "number": "0",
+            "Accept-Encoding": "",
+            "Expect": "100-continue",
         }
         if self.host_header:
             headers["Host"] = self.host_header
@@ -531,8 +516,11 @@ class OfficialTitleClient:
         region_id: int = 8,
         place_id: int = 0,
         generic_flag: int = 0,
+        client_id: str = "",
     ) -> dict[str, Any]:
         now = int(time.time())
+        auth_date_time = now + AUTH_TIME_OFFSET_SECONDS
+        login_date_time = now + CABINET_TIME_OFFSET_SECONDS
         response = await self.post(
             "UserLoginApi",
             session.user_id,
@@ -541,15 +529,15 @@ class OfficialTitleClient:
                 "accessCode": access_code or "",
                 "regionId": int(region_id or 0),
                 "placeId": int(place_id or 0),
-                "clientId": self.client_id,
-                "dateTime": now,
-                "loginDateTime": now,
+                "clientId": client_id or self.client_id,
+                "dateTime": auth_date_time,
+                "loginDateTime": login_date_time,
                 "isContinue": False,
                 "genericFlag": int(generic_flag or 0),
                 "token": session.token,
             },
         )
-        response.setdefault("_loginDateTime", now)
+        response.setdefault("_loginDateTime", login_date_time)
         return response
 
     async def get_user_music(
