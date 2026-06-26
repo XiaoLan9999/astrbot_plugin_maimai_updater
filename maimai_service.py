@@ -48,6 +48,12 @@ DEFAULT_OFFICIAL_PLACE_ID = 3496
 ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES = {1, 100}
 
 
+def _purge_official_interface_modules() -> None:
+    for module_name in list(sys.modules):
+        if module_name == "maimai_official_interface" or module_name.startswith("maimai_official_interface."):
+            sys.modules.pop(module_name, None)
+
+
 def _parse_version(version: str) -> tuple[int, ...]:
     parts: list[int] = []
     for part in version.replace("-", ".").split("."):
@@ -321,11 +327,6 @@ class MaimaiService:
     def _load_official_interface_client_cls(self) -> Any | None:
         if not self.official_interface_enabled:
             return None
-        try:
-            from maimai_official_interface import MaimaiOfficialClient  # type: ignore
-            return MaimaiOfficialClient
-        except (ImportError, AttributeError):
-            pass
 
         plugin_dir = Path(__file__).resolve().parent
         vendored_init = plugin_dir / "maimai_official_interface" / "__init__.py"
@@ -333,12 +334,19 @@ class MaimaiService:
             plugin_dir_text = str(plugin_dir)
             if plugin_dir_text not in sys.path:
                 sys.path.insert(0, plugin_dir_text)
-            sys.modules.pop("maimai_official_interface", None)
+            _purge_official_interface_modules()
             try:
                 from maimai_official_interface import MaimaiOfficialClient  # type: ignore
                 return MaimaiOfficialClient
             except (ImportError, AttributeError):
                 pass
+
+        _purge_official_interface_modules()
+        try:
+            from maimai_official_interface import MaimaiOfficialClient  # type: ignore
+            return MaimaiOfficialClient
+        except (ImportError, AttributeError):
+            pass
 
         for parent in (plugin_dir.parent, *plugin_dir.parents):
             repo_root = parent / "maimai_official_interface"
@@ -348,7 +356,7 @@ class MaimaiService:
             repo_root_text = str(repo_root)
             if repo_root_text not in sys.path:
                 sys.path.insert(0, repo_root_text)
-            sys.modules.pop("maimai_official_interface", None)
+            _purge_official_interface_modules()
             try:
                 from maimai_official_interface import MaimaiOfficialClient  # type: ignore
                 return MaimaiOfficialClient
