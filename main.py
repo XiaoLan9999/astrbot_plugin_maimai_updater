@@ -37,7 +37,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.6.17",
+    "0.6.28",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -129,6 +129,16 @@ class MaimaiUpdaterPlugin(Star):
             max_age_seconds=self.sgid_max_age_seconds,
         )
         if not freshness.ok:
+            current = int(time.time())
+            logger.warning(
+                "[MaimaiUpdater] SGID freshness validation rejected: "
+                "issued_at_cst=%s current_cst=%s age_seconds=%s max_age_seconds=%s reason=%s",
+                format_ts(freshness.issued_at),
+                format_ts(current),
+                current - freshness.issued_at if freshness.issued_at else "unknown",
+                self.sgid_max_age_seconds,
+                freshness.message,
+            )
             return freshness.message
 
         now = time.time()

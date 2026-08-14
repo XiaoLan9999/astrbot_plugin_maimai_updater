@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 SGID_PATTERN = re.compile(r"(SGWCMAID[^\s<>\]\[\"']+)", re.IGNORECASE)
 SGID_TIMESTAMP_PATTERN = re.compile(r"^SGWCMAID(\d{12})", re.IGNORECASE)
 IMPORT_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{100,180}$")
+SGID_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,13 +20,13 @@ class SgidFreshness:
 
 
 def now_ts() -> int:
-    return int(datetime.now().timestamp())
+    return int(time.time())
 
 
 def format_ts(value: int | None) -> str:
     if not value:
         return "未记录"
-    return datetime.fromtimestamp(int(value)).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.fromtimestamp(int(value), tz=SGID_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def extract_sgid(text: str) -> str | None:
@@ -44,7 +46,9 @@ def sgid_issued_at(value: str) -> int | None:
     if not match:
         return None
     try:
-        dt = datetime.strptime(f"20{match.group(1)}", "%Y%m%d%H%M%S")
+        dt = datetime.strptime(f"20{match.group(1)}", "%Y%m%d%H%M%S").replace(
+            tzinfo=SGID_TIMEZONE,
+        )
     except ValueError:
         return None
     return int(dt.timestamp())

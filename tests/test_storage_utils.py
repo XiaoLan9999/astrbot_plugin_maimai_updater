@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from astrbot_plugin_maimai_updater.storage import UserRecord, UserStore
 from astrbot_plugin_maimai_updater.utils import (
     extract_sgid,
+    format_ts,
     is_probable_import_token,
     is_probable_sgid,
     mask_secret,
@@ -31,6 +33,14 @@ class UtilsTest(unittest.TestCase):
         self.assertTrue(validate_sgid_freshness(sgid, now=issued_at + 120).ok)
         self.assertFalse(validate_sgid_freshness(sgid, now=issued_at + 301).ok)
         self.assertFalse(validate_sgid_freshness("SGWCMAIDbad", now=issued_at).ok)
+
+    def test_sgid_timestamp_is_always_parsed_as_china_standard_time(self):
+        sgid = "SGWCMAID260813053711abcdef"
+        issued_at = sgid_issued_at(sgid)
+        expected = int(datetime(2026, 8, 12, 21, 37, 11, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(issued_at, expected)
+        self.assertEqual(format_ts(issued_at), "2026-08-13 05:37:11")
+        self.assertTrue(validate_sgid_freshness(sgid, now=expected + 25).ok)
 
     def test_token_validation_and_masking(self):
         token = "a" * 127
