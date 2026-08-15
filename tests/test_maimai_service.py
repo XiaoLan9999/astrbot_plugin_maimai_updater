@@ -219,11 +219,9 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_sync_from_sgid_defaults_to_official_full_score_path(self):
         service = self.make_service()
         old_endpoints = maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS
-        old_runtime_check = maimai_service_module._supports_windows_official_runtime
         maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = (
             OfficialTitleEndpoint("https://example.test/Maimai2Servlet/SDGB/"),
         )
-        maimai_service_module._supports_windows_official_runtime = lambda: True
 
         async def fake_session_from_sgid(sgid: str):
             service.seen_sgid = sgid
@@ -253,7 +251,6 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = old_endpoints
-            maimai_service_module._supports_windows_official_runtime = old_runtime_check
 
         self.assertEqual(service.seen_sgid, "SGWCMAID-test")
         self.assertEqual(service.seen_session.user_id, 12345678)
@@ -296,8 +293,6 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_sync_from_sgid_prefers_custom_official_interface(self):
         service = self.make_service(official_interface_enabled=True)
         captured = {}
-        old_runtime_check = maimai_service_module._supports_windows_official_runtime
-        maimai_service_module._supports_windows_official_runtime = lambda: True
 
         class FakeOfficialResult:
             rating = 14370
@@ -324,13 +319,10 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
 
         service._load_official_interface_client_cls = lambda: FakeOfficialClient
 
-        try:
-            result = await service.sync_from_sgid_to_divingfish(
-                sgid="SGWCMAID-test",
-                import_token="import-token",
-            )
-        finally:
-            maimai_service_module._supports_windows_official_runtime = old_runtime_check
+        result = await service.sync_from_sgid_to_divingfish(
+            sgid="SGWCMAID-test",
+            import_token="import-token",
+        )
 
         self.assertEqual(captured["sgid"], "SGWCMAID-test")
         self.assertEqual(captured["kwargs"]["http_proxy"], "http://127.0.0.1:7890")
@@ -348,9 +340,7 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_sync_from_sgid_does_not_consume_sgid_without_title_endpoint(self):
         service = self.make_service()
         old_endpoints = maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS
-        old_runtime_check = maimai_service_module._supports_windows_official_runtime
         maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = ()
-        maimai_service_module._supports_windows_official_runtime = lambda: True
 
         async def fail_session_from_sgid(sgid: str):
             raise AssertionError("SGID should not be consumed before title endpoint is resolved")
@@ -365,7 +355,6 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
                 )
         finally:
             maimai_service_module.DEFAULT_OFFICIAL_TITLE_ENDPOINTS = old_endpoints
-            maimai_service_module._supports_windows_official_runtime = old_runtime_check
 
     async def test_sync_from_sgid_to_divingfish_uses_arcade_scores_when_explicit(self):
         service = self.make_service(score_source_mode="arcade")
@@ -472,47 +461,6 @@ class MaimaiServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(details[0]["dx_score"], 2914)
         self.assertEqual(details[0]["comboStatus"], 3)
         self.assertEqual(details[0]["syncStatus"], 4)
-
-    async def test_non_windows_sync_uses_cross_platform_full_score_path(self):
-        service = self.make_service(official_interface_enabled=True)
-        old_runtime_check = maimai_service_module._supports_windows_official_runtime
-        maimai_service_module._supports_windows_official_runtime = lambda: False
-
-        async def fake_arcade_details(sgid: str):
-            service.seen_sgid = sgid
-            return [
-                {
-                    "musicId": 11026,
-                    "level": 4,
-                    "achievement": 1001481,
-                    "comboStatus": 3,
-                    "syncStatus": 4,
-                    "deluxscoreMax": 2914,
-                }
-            ]
-
-        service._official_arcade_details_from_sgid = fake_arcade_details
-        service._load_official_interface_client_cls = lambda: (_ for _ in ()).throw(
-            AssertionError("Windows official runtime must not be loaded")
-        )
-
-        try:
-            result = await service.sync_from_sgid_to_divingfish(
-                sgid="SGWCMAID-test",
-                import_token="import-token",
-            )
-        finally:
-            maimai_service_module._supports_windows_official_runtime = old_runtime_check
-
-        self.assertEqual(service.seen_sgid, "SGWCMAID-test")
-        self.assertEqual(result.source, "official")
-        self.assertEqual(result.rating, 14370)
-        self.assertEqual(result.marked_score_count, 1)
-        identifier, scores, provider = service.client.updated
-        self.assertEqual(identifier.credentials, "import-token")
-        self.assertIsInstance(provider, FakeDivingFishProvider)
-        self.assertEqual(scores[0].fc, "AP")
-        self.assertEqual(scores[0].fs, "FSDP")
 
     async def test_official_sgid_resolver_captures_user_id_without_saving_sgid(self):
         service = self.make_service()

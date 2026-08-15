@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
+from .maimai_official_interface.wine_bridge import (
+    WineBridgeSessionError,
+    WineBridgeUnavailableError,
+    WineChimeBridge,
+)
+
 
 MAI_ENCODING = "1.55"
 API_PREFIX = "MaimaiChn"
@@ -201,6 +207,8 @@ class ChimeSessionResolver:
         server_url_index: int = 0,
         timeout: float = 20.0,
         poll_interval: float = 0.05,
+        bridge_path: str = "",
+        wine_binary: str = "",
     ) -> None:
         self.dll_path = Path(dll_path).expanduser()
         self.game_id = game_id or "MAID"
@@ -211,6 +219,8 @@ class ChimeSessionResolver:
         self.server_url_index = int(server_url_index or 0)
         self.timeout = float(timeout or 20.0)
         self.poll_interval = float(poll_interval or 0.05)
+        self.bridge_path = (bridge_path or "").strip()
+        self.wine_binary = (wine_binary or "").strip()
         self._dll: Any | None = None
         self._dll_dir_handle: Any | None = None
 
@@ -267,6 +277,30 @@ class ChimeSessionResolver:
                 dll_dir_handle.close()
 
     def resolve(self, sgid: str) -> ChimeSession:
+        if os.name != "nt":
+            erase_sgid_hash_identifier(sgid, game_id=self.qr_game_id)
+            try:
+                bridge = WineChimeBridge(
+                    dll_path=self.dll_path,
+                    bridge_path=self.bridge_path or None,
+                    wine_binary=self.wine_binary or None,
+                    timeout=self.timeout,
+                )
+                session = bridge.resolve(
+                    sgid,
+                    game_id=self.game_id,
+                    qr_game_id=self.qr_game_id,
+                    chip_id=self.chip_id,
+                    common_key=self.common_key,
+                    title_key=self.title_key,
+                    server_url_index=self.server_url_index,
+                )
+            except WineBridgeUnavailableError as exc:
+                raise OfficialProtocolUnavailableError(str(exc)) from exc
+            except WineBridgeSessionError as exc:
+                raise ChimeSessionError(str(exc)) from exc
+            return ChimeSession(user_id=session.user_id, token=session.token)
+
         dll = None
         handle = None
         try:

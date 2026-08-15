@@ -4,7 +4,6 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from importlib import metadata
-import os
 import sys
 from typing import Any
 
@@ -47,10 +46,6 @@ SCORE_SOURCE_MODES = {
 DEFAULT_OFFICIAL_KEYCHIP_ID = "A63E-01E11890000"
 DEFAULT_OFFICIAL_PLACE_ID = 3496
 ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES = {1, 100}
-
-
-def _supports_windows_official_runtime() -> bool:
-    return os.name == "nt"
 
 
 def _purge_official_interface_modules() -> None:
@@ -946,20 +941,7 @@ class MaimaiService:
         return details, rating, endpoint
 
     async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
-        if not _supports_windows_official_runtime():
-            details = await self._official_arcade_details_from_sgid(sgid)
-            rating = 0
-            logger.info(
-                "[MaimaiUpdater] cross-platform official score fetch succeeded: scores=%s marked=%s",
-                len(details),
-                sum(
-                    1
-                    for detail in details
-                    if self._official_combo_status_from_detail(detail)
-                    or self._official_sync_status_from_detail(detail)
-                ),
-            )
-        elif self._load_official_interface_client_cls() is not None:
+        if self._load_official_interface_client_cls() is not None:
             details, rating, _endpoint = await self._fetch_official_interface_details_and_rating(sgid)
         else:
             if not DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
