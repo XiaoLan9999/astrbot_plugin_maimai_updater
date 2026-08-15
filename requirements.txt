@@ -1,3 +1,4 @@
 maimai-py==1.5.1
+maimai-ffi==0.7.0
 httpx>=0.28.0,<0.29.0
 cryptography>=38.0

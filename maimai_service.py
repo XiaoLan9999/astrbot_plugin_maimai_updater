@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from importlib import metadata
+import os
 import sys
 from typing import Any
 
@@ -46,6 +47,10 @@ SCORE_SOURCE_MODES = {
 DEFAULT_OFFICIAL_KEYCHIP_ID = "A63E-01E11890000"
 DEFAULT_OFFICIAL_PLACE_ID = 3496
 ACCEPTED_OFFICIAL_LOGIN_RETURN_CODES = {1, 100}
+
+
+def _supports_windows_official_runtime() -> bool:
+    return os.name == "nt"
 
 
 def _purge_official_interface_modules() -> None:
@@ -583,6 +588,33 @@ class MaimaiService:
         }
         return any(any(key in detail for key in mark_keys) for detail in details)
 
+    @staticmethod
+    def _flatten_rival_music_response(response: Any) -> list[dict[str, Any]]:
+        if not isinstance(response, dict):
+            return []
+
+        details: list[dict[str, Any]] = []
+        for music in response.get("userRivalMusicList") or []:
+            if not isinstance(music, dict):
+                continue
+            try:
+                music_id = int(music.get("musicId") or 0)
+            except (TypeError, ValueError):
+                music_id = 0
+            for raw_detail in music.get("userRivalMusicDetailList") or []:
+                if not isinstance(raw_detail, dict):
+                    continue
+                detail = dict(raw_detail)
+                if music_id > 0:
+                    detail["musicId"] = music_id
+                if "dx_score" not in detail:
+                    for key in ("deluxscoreMax", "deluxeScoreMax", "deluxScoreMax"):
+                        if key in detail:
+                            detail["dx_score"] = detail[key]
+                            break
+                details.append(detail)
+        return details
+
     def _official_level_index(self, music_id: int, level: int) -> Any:
         imports = self._load_imports()
         LevelIndex = imports["LevelIndex"]
@@ -714,9 +746,33 @@ class MaimaiService:
         except ImportError as exc:
             raise MaimaiDependencyError("missing maimai-ffi arcade module") from exc
 
+        request_module = getattr(ffi_arcade, "request", None)
+        original_paginated = getattr(request_module, "request_paginated", None)
+        if request_module is None or original_paginated is None:
+            raise OfficialProtocolUnavailableError("maimai-ffi arcade request hook is unavailable")
+
+        captured_details: list[dict[str, Any]] = []
+
+        async def capture_request_paginated(
+            path: str,
+            data: dict[str, Any],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            response = await original_paginated(path, data, *args, **kwargs)
+            if str(path).rstrip("/").endswith("GetUserRivalMusicApi"):
+                captured_details.extend(self._flatten_rival_music_response(response))
+            return response
+
         encrypted = await ffi_arcade.get_uid_encrypted(str(sgid), http_proxy=self.http_proxy)
-        raw_scores = await ffi_arcade.get_user_scores(encrypted, http_proxy=self.http_proxy)
-        details = [dict(score) for score in raw_scores if isinstance(score, dict)]
+        async with self._ffi_request_lock:
+            setattr(request_module, "request_paginated", capture_request_paginated)
+            try:
+                raw_scores = await ffi_arcade.get_user_scores(encrypted, http_proxy=self.http_proxy)
+            finally:
+                setattr(request_module, "request_paginated", original_paginated)
+
+        details = captured_details or [dict(score) for score in raw_scores if isinstance(score, dict)]
         if not details:
             raise OfficialTitleServerError("official score source returned no scores")
         if not self._details_have_mark_fields(details):
@@ -890,7 +946,20 @@ class MaimaiService:
         return details, rating, endpoint
 
     async def _sync_official_sgid_to_divingfish(self, sgid: str, import_token: str) -> SyncResult:
-        if self._load_official_interface_client_cls() is not None:
+        if not _supports_windows_official_runtime():
+            details = await self._official_arcade_details_from_sgid(sgid)
+            rating = 0
+            logger.info(
+                "[MaimaiUpdater] cross-platform official score fetch succeeded: scores=%s marked=%s",
+                len(details),
+                sum(
+                    1
+                    for detail in details
+                    if self._official_combo_status_from_detail(detail)
+                    or self._official_sync_status_from_detail(detail)
+                ),
+            )
+        elif self._load_official_interface_client_cls() is not None:
             details, rating, _endpoint = await self._fetch_official_interface_details_and_rating(sgid)
         else:
             if not DEFAULT_OFFICIAL_TITLE_ENDPOINTS:
