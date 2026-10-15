@@ -8,10 +8,12 @@ from astrbot.api.all import register
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.api.event.filter import EventMessageType, command, event_message_type
 from astrbot.api.star import Context, Star, StarTools
+from astrbot.api.message_components import Image
 
 from .maimai_service import MaimaiService
 from .message_recaller import RecallResult, MessageRecaller
 from .storage import UserStore
+from .update_input import PendingUpdates, QrImageReader, UpdateInputError, select_sgid
 from .utils import (
     extract_sgid,
     format_ts,
@@ -37,7 +39,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.6.30",
+    "0.7.0",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -55,6 +57,8 @@ class MaimaiUpdaterPlugin(Star):
         self.service = MaimaiService(
             timeout=self._int_config("request_timeout_seconds", 30),
             http_proxy=str(self.config.get("maimai_http_proxy", "") or ""),
+            remote_score_url=str(self.config.get("remote_score_url", "") or ""),
+            remote_score_token=str(self.config.get("remote_score_token", "") or ""),
         )
         self.recaller = MessageRecaller(
             context,
@@ -62,6 +66,10 @@ class MaimaiUpdaterPlugin(Star):
         )
         self.sgid_max_age_seconds = self._int_config("sgid_max_age_seconds", 180)
         self._used_sgid_hashes: dict[str, float] = {}
+        self.pending_updates = PendingUpdates(self._int_config("update_input_timeout_seconds", 180))
+        self.qr_reader = QrImageReader()
+        self._active_updates: set[str] = set()
+        self._reading_inputs: set[str] = set()
 
     def _int_config(self, key: str, default: int) -> int:
         try:
@@ -83,6 +91,14 @@ class MaimaiUpdaterPlugin(Star):
     def _user_key(event: AstrMessageEvent) -> str:
         return f"{event.get_platform_name()}:{event.get_sender_id()}"
 
+    @staticmethod
+    def _input_key(event: AstrMessageEvent) -> tuple[str, str, str]:
+        return (str(event.get_platform_id()), event.unified_msg_origin, str(event.get_sender_id()))
+
+    @staticmethod
+    def _images(event: AstrMessageEvent) -> list[Image]:
+        return [part for part in event.get_messages() if isinstance(part, Image)]
+
     async def _send_text(self, event: AstrMessageEvent, text: str) -> None:
         await event.send(event.plain_result(text))
 
@@ -97,7 +113,7 @@ class MaimaiUpdaterPlugin(Star):
 
     @staticmethod
     def _prefixless_update_example() -> str:
-        return "更新水鱼 SGWCMAID..."
+        return "更新水鱼"
 
     @staticmethod
     def _split_plain_command(content: str, command_text: str) -> str | None:
@@ -166,6 +182,17 @@ class MaimaiUpdaterPlugin(Star):
             await event.send(result)
 
     async def _update_from_credential(self, event: AstrMessageEvent, credential_text: str) -> None:
+        user_key = self._user_key(event)
+        if user_key in self._active_updates:
+            await self._send_text(event, "你的成绩正在更新，请等待本次更新完成。")
+            return
+        self._active_updates.add(user_key)
+        try:
+            await self._sync_credential(event, credential_text)
+        finally:
+            self._active_updates.discard(user_key)
+
+    async def _sync_credential(self, event: AstrMessageEvent, credential_text: str) -> None:
         event.stop_event()
         user_key = self._user_key(event)
         record = self.store.get(user_key)
@@ -188,6 +215,9 @@ class MaimaiUpdaterPlugin(Star):
 
         if not is_probable_sgid(sgid):
             await self._send_text(event, "❌ SGID 格式不正确，请发送以 SGWCMAID 开头的完整文本。")
+            return
+
+        if not await self._check_backend(event):
             return
 
         if validation_error := self._validate_sgid_for_one_time_use(sgid):
@@ -255,10 +285,10 @@ class MaimaiUpdaterPlugin(Star):
         if self.require_command_prefix:
             update_hint = (
                 "之后带 Bot 唤醒前缀执行 "
-                f"maimaiupdate <SGID> / {self._prefixless_update_example()} 即可更新 B50。"
+                "更新水鱼，再按提示发送官方二维码图片或 SGID 即可更新 B50。"
             )
         else:
-            update_hint = f"之后直接发送 {self._prefixless_update_example()} 即可更新 B50。"
+            update_hint = "之后发送 更新水鱼，再按提示发送官方二维码图片或 SGID 即可更新 B50。"
         await self._send_text(
             event,
             f"✅ 水鱼绑定成功：{mask_secret(token)}\n"
@@ -267,19 +297,67 @@ class MaimaiUpdaterPlugin(Star):
 
     @command("maimaiupdate", alias={"更新水鱼", "水鱼更新", "更新b50", "更新B50"})
     async def update_scores(self, event: AstrMessageEvent, credential_text: str = ""):
-        credential_text = (credential_text or "").strip()
-        if not extract_sgid(credential_text):
-            update_usage = self._prefixless_update_example()
-            if self.require_command_prefix:
-                update_usage = f"maimaiupdate <SGID> / {self._prefixless_update_example()}"
-            return self._message(
-                f"用法：{update_usage}\n"
-                "注意：SGID 只能使用一次，请每次从官方二维码重新识别后再更新。"
-            )
-
+        if event.get_extra("maimai_updater_update_handled", False):
+            return
+        event.set_extra("maimai_updater_update_handled", True)
         event.stop_event()
+        if self._user_key(event) in self._active_updates or self._user_key(event) in self._reading_inputs:
+            await self._send_text(event, "你的成绩正在更新，请等待本次更新完成。")
+            return
+        if not self.store.get(self._user_key(event)).divingfish_import_token:
+            await self._send_text(event, "尚未绑定水鱼，请先发送 水鱼绑定 <Import-Token>（按面板配置添加唤醒前缀）。")
+            return
+        if not await self._check_backend(event):
+            return
+        credential_text = (credential_text or "").strip()
+        if not credential_text and not self._images(event):
+            self.pending_updates.begin(self._input_key(event))
+            await self._send_text(
+                event, f"请在 {self.pending_updates.timeout} 秒内发送官方玩家二维码图片或完整 SGID 文本。\n"
+                "发送 取消更新 可结束本次等待。",
+            )
+            return
+        await self._receive_update_input(event, credential_text)
+
+    async def _check_backend(self, event: AstrMessageEvent) -> bool:
+        try:
+            self.service.ensure_backend_available()
+        except Exception as exc:
+            await self._send_text(event, self.service.describe_error(exc))
+            return False
+        return True
+
+    async def _receive_update_input(self, event: AstrMessageEvent, text: str) -> None:
+        user_key = self._user_key(event)
+        if user_key in self._reading_inputs or user_key in self._active_updates:
+            await self._recall_current_message(event)
+            await self._send_text(event, "正在处理你的更新，请稍候。")
+            return
+        self._reading_inputs.add(user_key)
+        try:
+            await self._decode_update_input(event, text)
+        finally:
+            self._reading_inputs.discard(user_key)
+
+    async def _decode_update_input(self, event: AstrMessageEvent, text: str) -> None:
+        key = self._input_key(event)
+        was_waiting = self.pending_updates.state(key) == "waiting"
         await self._recall_current_message(event)
-        await self._update_from_credential(event, credential_text)
+        try:
+            values = [text]
+            if images := self._images(event):
+                values.extend(await self.qr_reader.read(images))
+            sgid = select_sgid(values)
+        except UpdateInputError as exc:
+            await self._send_text(event, f"❌ {exc}")
+            return
+        if was_waiting and self.pending_updates.state(key) != "waiting":
+            if self.pending_updates.state(key) == "expired":
+                self.pending_updates.remove(key)
+                await self._send_text(event, "本次等待已超时，请重新发送 更新水鱼。")
+            return
+        self.pending_updates.remove(key)
+        await self._update_from_credential(event, sgid)
 
     @command("maimaiclear", alias={"清空水鱼", "清空b50", "清空B50"})
     async def clear_scores(self, event: AstrMessageEvent, confirm: str = ""):
@@ -319,7 +397,7 @@ class MaimaiUpdaterPlugin(Star):
             user_key,
             result="已向水鱼发送清空成绩请求",
         )
-        return self._message("✅ 已向水鱼发送清空成绩请求。重新发送新的 SGID 即可再次更新 B50。")
+        return self._message("✅ 已向水鱼发送清空成绩请求。发送 更新水鱼，再按提示提供二维码图片或 SGID 即可再次更新 B50。")
 
     @command("maimaistatus", alias={"水鱼状态"})
     async def status(self, event: AstrMessageEvent):
@@ -332,7 +410,7 @@ class MaimaiUpdaterPlugin(Star):
                 "免前缀用法：水鱼状态 / 水鱼绑定 <Token> / "
                 f"{self._prefixless_update_example()}"
             )
-        lines.append("官方 SGID：每次更新临时提供")
+        lines.append("更新方式：发送 更新水鱼，再发送二维码图片或 SGID")
         lines.append(f"水鱼 Token：{mask_secret(record.divingfish_import_token)}")
         if record.rating:
             lines.append(f"Rating：{record.rating}")
@@ -343,15 +421,36 @@ class MaimaiUpdaterPlugin(Star):
 
     @command("maimaiunbind", alias={"水鱼解绑"})
     async def unbind(self, event: AstrMessageEvent):
+        self.pending_updates.remove(self._input_key(event))
         removed = await self.store.remove(self._user_key(event))
         if removed:
             return self._message("✅ 已删除你的水鱼 Token 和本地展示状态。")
         return self._message("当前没有保存的绑定信息。")
 
-    @event_message_type(EventMessageType.ALL)
+    @event_message_type(EventMessageType.ALL, priority=100)
     async def handle_plain_command(self, event: AstrMessageEvent):
         parsed = self._parse_plain_command(event.message_str or "")
         if not parsed:
+            key = self._input_key(event)
+            state = self.pending_updates.state(key)
+            if state == "absent":
+                return
+            content = (event.message_str or "").strip()
+            if content in {"取消", "取消更新"}:
+                event.stop_event()
+                self.pending_updates.remove(key)
+                await self._send_text(event, "已取消本次更新。")
+                return
+            if not extract_sgid(content) and not self._images(event):
+                return
+            event.stop_event()
+            event.set_extra("maimai_updater_update_handled", True)
+            if state == "expired":
+                self.pending_updates.remove(key)
+                await self._recall_current_message(event)
+                await self._send_text(event, "本次等待已超时，请重新发送 更新水鱼。")
+                return
+            await self._receive_update_input(event, content)
             return
 
         event.stop_event()
@@ -371,4 +470,5 @@ class MaimaiUpdaterPlugin(Star):
         await self._send_command_result(event, result)
 
     async def terminate(self):
+        self.pending_updates.clear()
         await self.service.close()

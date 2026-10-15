@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8
+qrcode>=8
+packaging>=24

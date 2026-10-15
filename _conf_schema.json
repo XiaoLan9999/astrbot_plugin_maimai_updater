@@ -1,7 +1,7 @@
 {
   "require_command_prefix": {
     "description": "需要唤醒前缀",
-    "hint": "开启后只响应带 Bot 唤醒前缀的命令，例如 /水鱼状态、/水鱼绑定 <Token>、/更新水鱼 SGWCMAID...。关闭后本插件命令可直接发送，例如 水鱼状态、水鱼绑定 <Token>、绑定水鱼 <Token>、更新水鱼 SGWCMAID...。裸 SGID 不会触发。",
+    "hint": "开启后命令需带 Bot 唤醒前缀，例如 /更新水鱼；关闭后可直接发送 更新水鱼。触发后按提示发送二维码图片或 SGID，无需再加前缀。未触发更新时，单独发二维码或 SGID 不会更新。",
     "type": "bool",
     "default": true
   },
@@ -10,6 +10,24 @@
     "hint": "启用后可使用 maimaiclear 确认清空 / 清空水鱼 确认清空 / 清空b50 确认清空 向水鱼发送清空成绩请求。",
     "type": "bool",
     "default": true
+  },
+  "update_input_timeout_seconds": {
+    "description": "等待二维码或 SGID 的时间",
+    "hint": "发送更新水鱼后，在同一会话等待该用户发送二维码图片或 SGID 的秒数。",
+    "type": "int",
+    "default": 180
+  },
+  "remote_score_url": {
+    "description": "远程成绩服务地址",
+    "hint": "安卓 Ubuntu 容器、ARM64 等设备需配置。填写自行部署的成绩服务根地址；Windows x64 或已配置本地运行环境的 Linux x64 可以留空。",
+    "type": "string",
+    "default": ""
+  },
+  "remote_score_token": {
+    "description": "远程成绩服务访问密钥",
+    "hint": "填写与远程成绩服务一致的访问密钥。水鱼 Import-Token 仍通过水鱼绑定命令单独绑定。",
+    "type": "string",
+    "default": ""
   },
   "sgid_max_age_seconds": {
     "description": "SGID 最大有效时间",

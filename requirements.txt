@@ -1,4 +1,6 @@
-maimai-py==1.5.1
-maimai-ffi==0.7.0
+maimai-py==1.5.1; (sys_platform == 'win32' or sys_platform == 'linux') and (platform_machine == 'AMD64' or platform_machine == 'x86_64')
+maimai-ffi==0.7.0; (sys_platform == 'win32' or sys_platform == 'linux') and (platform_machine == 'AMD64' or platform_machine == 'x86_64')
 httpx>=0.28.0,<0.29.0
 cryptography>=38.0
+Pillow>=10.4.0,<13
+zxing-cpp>=2.3.0,<4

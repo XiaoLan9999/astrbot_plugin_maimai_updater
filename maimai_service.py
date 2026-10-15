@@ -7,6 +7,10 @@ from importlib import metadata
 import sys
 from typing import Any
 
+from .remote_scores import (
+    PortableBackendError, PortableScoreClient, supports_local_runtime, validate_service_url,
+)
+
 from .official_protocol import (
     DEFAULT_OFFICIAL_TITLE_ENDPOINTS,
     ChimeSession,
@@ -142,6 +146,8 @@ class MaimaiService:
         official_game_id: str = "MAID",
         official_title_key: str = "SDGB",
         official_interface_enabled: bool = True,
+        remote_score_url: str = "",
+        remote_score_token: str = "",
     ):
         self.timeout = float(timeout or 30.0)
         self.http_proxy = (http_proxy or "").strip() or None
@@ -160,6 +166,18 @@ class MaimaiService:
         self.official_title_key = (official_title_key or "SDGB").strip() or "SDGB"
         self.official_interface_enabled = bool(official_interface_enabled)
         self._ffi_request_lock = asyncio.Lock()
+        self.remote_score_url = (remote_score_url or "").strip()
+        self.remote_score_token = (remote_score_token or "").strip()
+
+    def ensure_backend_available(self) -> None:
+        if self.remote_score_url:
+            validate_service_url(self.remote_score_url)
+            if not self.remote_score_token:
+                raise PortableBackendError("请在插件面板填写远程成绩服务访问密钥。")
+        elif not supports_local_runtime():
+            raise PortableBackendError(
+                "当前设备需要远程成绩服务，请让 Bot 管理员在插件面板填写服务地址和访问密钥。"
+            )
 
     def _ensure_dependency_versions(self) -> None:
         requirements = (
@@ -999,6 +1017,18 @@ class MaimaiService:
         sgid: str,
         import_token: str,
     ) -> SyncResult:
+        self.ensure_backend_available()
+        if self.remote_score_url:
+            portable = PortableScoreClient(self.timeout)
+            details, rating = await portable.fetch(
+                self.remote_score_url, self.remote_score_token, sgid,
+            )
+            imported = await portable.update(details, import_token)
+            warning = f"水鱼曲库暂未收录 {imported.skipped} 条成绩，已跳过。" if imported.skipped else ""
+            return SyncResult(
+                player_name="", rating=rating, score_count=imported.count,
+                marked_score_count=imported.marked, player_warning=warning, source="official",
+            )
         source_mode = self._score_source_mode()
         if source_mode == SCORE_SOURCE_OFFICIAL_ONLY:
             return await self._sync_official_sgid_to_divingfish(sgid, import_token)
@@ -1013,6 +1043,9 @@ class MaimaiService:
         )
 
     async def clear_divingfish_scores(self, *, import_token: str) -> None:
+        if self.remote_score_url or not supports_local_runtime():
+            await PortableScoreClient(self.timeout).clear(import_token)
+            return
         await self.client.updates(
             self._identifier(credentials=import_token),
             [],
@@ -1029,6 +1062,10 @@ class MaimaiService:
         self._client = None
 
     def describe_error(self, exc: BaseException) -> str:
+        if isinstance(exc, PortableBackendError):
+            return str(exc)
+        if exc.__class__.__module__.startswith("httpx"):
+            return "网络请求失败，请检查网络或远程成绩服务状态。"
         if isinstance(exc, MaimaiDependencyError):
             root = exc.__cause__
             if isinstance(root, SyntaxError):

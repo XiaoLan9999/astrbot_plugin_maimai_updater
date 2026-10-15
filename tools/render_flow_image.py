@@ -96,7 +96,7 @@ def main() -> None:
     mark_font = load_font(24, bold=True)
 
     centered(draw, "maimai 水鱼更新器", 54, title_font, (17, 107, 156, 255))
-    centered(draw, "绑定水鱼 Token 后，发送“更新水鱼 SGID”更新 B50", 120, subtitle_font, (47, 126, 168, 255))
+    centered(draw, "绑定水鱼后，发送“更新水鱼”，再发送二维码图片或 SGID", 120, subtitle_font, (47, 126, 168, 255))
 
     def rounded_rect_with_shadow(box: tuple[int, int, int, int], radius: int = 24) -> None:
         x1, y1, x2, y2 = box
@@ -129,14 +129,14 @@ def main() -> None:
 
     card(72, 220, 1, "绑定水鱼", "水鱼绑定", "<Import-Token>", "只保存水鱼 Token")
     arrow(374, 344, 456)
-    card(474, 220, 2, "获取 SGID", "官方公众号 / 网页", "识别二维码文本", "180 秒内使用")
+    card(474, 220, 2, "开始更新", "发送 更新水鱼", "等待 Bot 提示", "唤醒前缀可在面板设置")
     arrow(776, 344, 858)
-    card(876, 220, 3, "触发更新", "更新水鱼", "SGWCMAID...", "群聊自动尝试撤回")
+    card(876, 220, 3, "发送二维码", "二维码图片 / SGID", "180 秒内发送", "支持扫描图片中的多个码")
 
     rounded_rect_with_shadow((286, 526, 1114, 708))
     draw.text((340, 581), "完成后", font=card_title_font, fill=(18, 101, 143, 255))
     draw.text((340, 629), "水鱼数据已更新，可以继续用现有 B50 插件查询。", font=subtitle_font, fill=(36, 95, 122, 255))
-    draw.text((340, 669), "插件不保存 SGID，也不保存官方临时凭据。", font=foot_font, fill=(92, 135, 152, 255))
+    draw.text((340, 669), "保留 FC / FS / AP / SYNC 等特殊标识。", font=foot_font, fill=(92, 135, 152, 255))
     draw.ellipse((994, 599, 1082, 668), fill=(27, 167, 225, 42))
     draw.ellipse((1038, 594, 1062, 618), fill=(27, 167, 225, 82))
 
