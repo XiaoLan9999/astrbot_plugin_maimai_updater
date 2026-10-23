@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from .remote_scores import (
-    PortableBackendError, PortableScoreClient, supports_local_runtime, validate_service_url,
+    PortableBackendError, PortableScoreClient, supports_local_runtime,
 )
 from .maimai_official_interface.local_runtime import is_arm64_linux
 
@@ -167,17 +167,14 @@ class MaimaiService:
         self.official_title_key = (official_title_key or "SDGB").strip() or "SDGB"
         self.official_interface_enabled = bool(official_interface_enabled)
         self._ffi_request_lock = asyncio.Lock()
-        self.remote_score_url = (remote_score_url or "").strip()
-        self.remote_score_token = (remote_score_token or "").strip()
+        # Accept legacy constructor arguments without enabling remote mode.
+        self.remote_score_url = ""
+        self.remote_score_token = ""
 
     def ensure_backend_available(self) -> None:
-        if self.remote_score_url:
-            validate_service_url(self.remote_score_url)
-            if not self.remote_score_token:
-                raise PortableBackendError("请在插件面板填写远程成绩服务访问密钥。")
-        elif not supports_local_runtime():
+        if not supports_local_runtime():
             raise PortableBackendError(
-                "当前设备的本地运行环境尚未就绪，请 Bot 管理员执行 舞萌环境准备；也可在面板配置远程成绩服务。"
+                "当前设备的本地运行环境尚未就绪，请 Bot 管理员执行 舞萌环境准备 和 舞萌环境检测。"
             )
 
     def _ensure_dependency_versions(self) -> None:
@@ -1019,12 +1016,6 @@ class MaimaiService:
         import_token: str,
     ) -> SyncResult:
         self.ensure_backend_available()
-        if self.remote_score_url:
-            portable = PortableScoreClient(self.timeout)
-            details, rating = await portable.fetch(
-                self.remote_score_url, self.remote_score_token, sgid,
-            )
-            return await self._import_portable_details(details, rating, import_token)
         if is_arm64_linux():
             details, rating, _endpoint = await self._fetch_official_interface_details_and_rating(sgid)
             return await self._import_portable_details(details, rating, import_token)
@@ -1051,7 +1042,7 @@ class MaimaiService:
         )
 
     async def clear_divingfish_scores(self, *, import_token: str) -> None:
-        if self.remote_score_url or is_arm64_linux() or not supports_local_runtime():
+        if is_arm64_linux() or not supports_local_runtime():
             await PortableScoreClient(self.timeout).clear(import_token)
             return
         await self.client.updates(
@@ -1073,7 +1064,7 @@ class MaimaiService:
         if isinstance(exc, PortableBackendError):
             return str(exc)
         if exc.__class__.__module__.startswith("httpx"):
-            return "网络请求失败，请检查网络或远程成绩服务状态。"
+            return "网络请求失败，请检查 Bot 所在设备的网络后重试。"
         if isinstance(exc, MaimaiDependencyError):
             root = exc.__cause__
             if isinstance(root, SyntaxError):

@@ -46,7 +46,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.7.1",
+    "0.7.2",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -64,8 +64,6 @@ class MaimaiUpdaterPlugin(Star):
         self.service = MaimaiService(
             timeout=self._int_config("request_timeout_seconds", 30),
             http_proxy=str(self.config.get("maimai_http_proxy", "") or ""),
-            remote_score_url=str(self.config.get("remote_score_url", "") or ""),
-            remote_score_token=str(self.config.get("remote_score_token", "") or ""),
         )
         self.recaller = MessageRecaller(
             context,
@@ -476,7 +474,7 @@ class MaimaiUpdaterPlugin(Star):
                 "requires_ubuntu_24_04": "当前准备工具适用于 Ubuntu 24.04 ARM64，请确认 App 的容器版本。",
                 "container_admin_required": "请在 App 的 Ubuntu 容器管理员环境中准备。",
                 "requires_3gb_free_space": "容器剩余空间不足，请保留至少 3 GB 空间后重试。",
-                "requires_4k_pages": "当前手机的内存页大小不适用本地运行环境，请继续使用远程成绩模式。",
+                "requires_4k_pages": "当前手机的内存页大小不适用这套本地运行环境，请联系维护者反馈设备信息。",
                 "download_failed": "运行环境下载失败，请检查手机网络后重试。",
                 "download_checksum_mismatch": "下载文件校验失败，请重试。",
                 "not_prepared": "本地运行环境尚未准备。安卓端请 Bot 管理员发送 舞萌环境准备。",

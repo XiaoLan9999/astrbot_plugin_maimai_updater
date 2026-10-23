@@ -58,7 +58,7 @@ class LocalRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(runner._environment()["HODLL64"], "libarm64ecfex.dll")
 
     async def test_arm64_local_flow_does_not_import_x64_python_dependencies(self):
-        service = MaimaiService()
+        service = MaimaiService(remote_score_url="https://old.example.test", remote_score_token="old-key")
         details = [{"musicId": 11026, "comboStatus": 3, "syncStatus": 4}]
         service._fetch_official_interface_details_and_rating = AsyncMock(return_value=(details, 14205, ""))
         portable = Mock()

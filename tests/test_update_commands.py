@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import logging
 import sys
 import tempfile
@@ -171,10 +172,10 @@ class UpdateCommandTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("尚未绑定", event.messages[-1])
         self.assertEqual(self.plugin.pending_updates.state(self.plugin._input_key(event)), "absent")
         await self.plugin.store.set_import_token("test:user", "token")
-        self.plugin.service.ensure_backend_available.side_effect = RuntimeError("请配置远程成绩服务")
+        self.plugin.service.ensure_backend_available.side_effect = RuntimeError("请先准备本地运行环境")
         event = Event("更新水鱼")
         await self.plugin.handle_plain_command(event)
-        self.assertIn("远程成绩服务", event.messages[-1])
+        self.assertIn("本地运行环境", event.messages[-1])
         self.assertEqual(self.plugin.pending_updates.state(self.plugin._input_key(event)), "absent")
 
     async def test_concurrent_followups_do_not_duplicate_update(self):
@@ -227,3 +228,23 @@ class UpdateCommandTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("检测通过", event.messages[-1])
         self.assertNotIn("--install", start.call_args.args)
         self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()
+
+    async def test_remote_fields_are_hidden_and_old_config_is_not_read(self):
+        class LegacyConfig(dict):
+            def get(self, key, default=None):
+                if key in {"remote_score_url", "remote_score_token"}:
+                    raise AssertionError("Disabled remote settings must not be read")
+                return super().get(key, default)
+
+        config = LegacyConfig(remote_score_url="https://old.example.test", remote_score_token="old-key")
+        with (
+            patch.object(plugin_module.StarTools, "get_data_dir", return_value=self.folder.name),
+            patch.object(plugin_module, "MaimaiService") as constructor,
+        ):
+            plugin_module.MaimaiUpdaterPlugin(object(), config)
+        self.assertNotIn("remote_score_url", constructor.call_args.kwargs)
+        self.assertNotIn("remote_score_token", constructor.call_args.kwargs)
+        schema_path = Path(__file__).resolve().parents[1] / "_conf_schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertNotIn("remote_score_url", schema)
+        self.assertNotIn("remote_score_token", schema)

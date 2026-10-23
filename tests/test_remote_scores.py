@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from packaging.requirements import Requirement
@@ -24,15 +24,11 @@ class PortableScoresTest(unittest.IsolatedAsyncioTestCase):
         client._http_client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return client
 
-    async def test_remote_flow_preserves_marks_without_native_dependencies(self):
+    async def test_portable_import_preserves_marks_without_native_dependencies(self):
         requests = []
 
         def respond(request):
             requests.append(request)
-            if request.url.path == "/v1/scores":
-                self.assertEqual(request.headers["Authorization"], "Bearer service-key")
-                self.assertNotIn("Import-Token", request.headers)
-                return httpx.Response(200, json={"protocol": 1, "rating": 14205, "music_details": DETAILS})
             if request.url.path.endswith("music_data"):
                 return httpx.Response(200, json=SONGS)
             self.assertEqual(request.headers["Import-Token"], "user-import-token")
@@ -43,15 +39,24 @@ class PortableScoresTest(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json={"message": "success"})
 
         client = self.client(respond)
-        service = MaimaiService(remote_score_url="https://scores.example.test", remote_score_token="service-key")
+        result = await client.update(DETAILS, "user-import-token")
+        self.assertEqual((result.count, result.marked, result.skipped), (1, 1, 0))
+        self.assertEqual(len(requests), 2)
+
+    async def test_legacy_remote_settings_cannot_override_local_backend(self):
+        service = MaimaiService(remote_score_url="not-a-valid-url", remote_score_token="old-service-key")
+        service._sync_official_sgid_to_divingfish = AsyncMock(return_value="local-result")
         with (
-            patch("astrbot_plugin_maimai_updater.maimai_service.PortableScoreClient", return_value=client),
-            patch("astrbot_plugin_maimai_updater.maimai_service.supports_local_runtime", return_value=False),
-            patch.object(service, "_load_imports", side_effect=AssertionError("native import")),
+            patch("astrbot_plugin_maimai_updater.maimai_service.supports_local_runtime", return_value=True),
+            patch("astrbot_plugin_maimai_updater.maimai_service.is_arm64_linux", return_value=False),
+            patch.object(PortableScoreClient, "fetch", new_callable=AsyncMock) as remote_fetch,
         ):
-            result = await service.sync_from_sgid_to_divingfish(sgid="sample-sgid", import_token="user-import-token")
-        self.assertEqual((result.score_count, result.marked_score_count, result.rating), (1, 1, 14205))
-        self.assertEqual(len(requests), 3)
+            result = await service.sync_from_sgid_to_divingfish(sgid="sample-sgid", import_token="user-token")
+        remote_fetch.assert_not_awaited()
+        service._sync_official_sgid_to_divingfish.assert_awaited_once_with("sample-sgid", "user-token")
+        self.assertEqual(result, "local-result")
+        self.assertEqual(service.remote_score_url, "")
+        self.assertEqual(service.remote_score_token, "")
 
     async def test_rejected_auth_and_incomplete_marks_never_write(self):
         for status, body in [(401, {}), (200, {"protocol": 1, "music_details": [{"musicId": 1}]})]:
@@ -63,8 +68,8 @@ class PortableScoresTest(unittest.IsolatedAsyncioTestCase):
 
     def test_arm64_preflight_and_requirements_markers(self):
         with patch("astrbot_plugin_maimai_updater.maimai_service.supports_local_runtime", return_value=False):
-            with self.assertRaisesRegex(PortableBackendError, "远程成绩服务"):
-                MaimaiService().ensure_backend_available()
+            with self.assertRaisesRegex(PortableBackendError, "本地运行环境"):
+                MaimaiService(remote_score_url="https://old.example.test", remote_score_token="old-key").ensure_backend_available()
         requirements = Path(__file__).resolve().parents[1] / "requirements.txt"
         for line in requirements.read_text().splitlines():
             req = Requirement(line)

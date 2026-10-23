@@ -17,18 +17,6 @@
     "type": "int",
     "default": 180
   },
-  "remote_score_url": {
-    "description": "远程成绩服务地址",
-    "hint": "可选，填写自行部署的成绩服务根地址。安卓 Ubuntu 24.04 ARM64 可由 Bot 管理员执行 舞萌环境准备，通过检测后可留空并使用本地模式；不适用本地模式的设备仍可配置远程服务。",
-    "type": "string",
-    "default": ""
-  },
-  "remote_score_token": {
-    "description": "远程成绩服务访问密钥",
-    "hint": "填写与远程成绩服务一致的访问密钥。水鱼 Import-Token 仍通过水鱼绑定命令单独绑定。",
-    "type": "string",
-    "default": ""
-  },
   "sgid_max_age_seconds": {
     "description": "SGID 最大有效时间",
     "hint": "根据 SGID 内嵌时间戳判断是否过期，默认只接受 180 秒内生成的 SGID。",

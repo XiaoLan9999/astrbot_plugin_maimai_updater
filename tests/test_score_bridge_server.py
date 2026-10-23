@@ -5,7 +5,7 @@ import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -19,6 +19,12 @@ spec.loader.exec_module(server_module)
 
 
 class ScoreBridgeServerTest(unittest.TestCase):
+    def test_remote_server_entry_point_is_paused(self):
+        with patch.object(server_module, "make_server") as create:
+            with self.assertRaisesRegex(SystemExit, "temporarily disabled"):
+                server_module.main()
+        create.assert_not_called()
+
     def test_http_contract_auth_and_invalid_credential(self):
         fetch = AsyncMock(return_value={"protocol": 1, "rating": 14205, "music_details": [{"test": "score"}]})
         server = server_module.make_server(("127.0.0.1", 0), "secret", fetch)

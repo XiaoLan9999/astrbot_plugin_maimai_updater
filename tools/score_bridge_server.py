@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import hmac
 import json
-import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -109,21 +107,7 @@ def make_server(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Maimai full-score service")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=18250)
-    args = parser.parse_args()
-    token = os.environ.get("MAIMAI_SCORE_SERVICE_TOKEN", "")
-    if not token:
-        parser.error("Set MAIMAI_SCORE_SERVICE_TOKEN before starting the service")
-    server = make_server((args.host, args.port), token)
-    print(f"Score service listening on {args.host}:{args.port}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    raise SystemExit("Remote score service is temporarily disabled. Use the local score runtime.")
 
 
 if __name__ == "__main__":
