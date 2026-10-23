@@ -10,6 +10,7 @@ from typing import Any
 from .remote_scores import (
     PortableBackendError, PortableScoreClient, supports_local_runtime, validate_service_url,
 )
+from .maimai_official_interface.local_runtime import is_arm64_linux
 
 from .official_protocol import (
     DEFAULT_OFFICIAL_TITLE_ENDPOINTS,
@@ -176,7 +177,7 @@ class MaimaiService:
                 raise PortableBackendError("请在插件面板填写远程成绩服务访问密钥。")
         elif not supports_local_runtime():
             raise PortableBackendError(
-                "当前设备需要远程成绩服务，请让 Bot 管理员在插件面板填写服务地址和访问密钥。"
+                "当前设备的本地运行环境尚未就绪，请 Bot 管理员执行 舞萌环境准备；也可在面板配置远程成绩服务。"
             )
 
     def _ensure_dependency_versions(self) -> None:
@@ -1023,12 +1024,10 @@ class MaimaiService:
             details, rating = await portable.fetch(
                 self.remote_score_url, self.remote_score_token, sgid,
             )
-            imported = await portable.update(details, import_token)
-            warning = f"水鱼曲库暂未收录 {imported.skipped} 条成绩，已跳过。" if imported.skipped else ""
-            return SyncResult(
-                player_name="", rating=rating, score_count=imported.count,
-                marked_score_count=imported.marked, player_warning=warning, source="official",
-            )
+            return await self._import_portable_details(details, rating, import_token)
+        if is_arm64_linux():
+            details, rating, _endpoint = await self._fetch_official_interface_details_and_rating(sgid)
+            return await self._import_portable_details(details, rating, import_token)
         source_mode = self._score_source_mode()
         if source_mode == SCORE_SOURCE_OFFICIAL_ONLY:
             return await self._sync_official_sgid_to_divingfish(sgid, import_token)
@@ -1042,8 +1041,17 @@ class MaimaiService:
             import_token,
         )
 
+    async def _import_portable_details(self, details: list[dict], rating: int, import_token: str) -> SyncResult:
+        portable = PortableScoreClient(self.timeout)
+        imported = await portable.update(details, import_token)
+        warning = f"水鱼曲库暂未收录 {imported.skipped} 条成绩，已跳过。" if imported.skipped else ""
+        return SyncResult(
+            player_name="", rating=rating, score_count=imported.count,
+            marked_score_count=imported.marked, player_warning=warning, source="official",
+        )
+
     async def clear_divingfish_scores(self, *, import_token: str) -> None:
-        if self.remote_score_url or not supports_local_runtime():
+        if self.remote_score_url or is_arm64_linux() or not supports_local_runtime():
             await PortableScoreClient(self.timeout).clear(import_token)
             return
         await self.client.updates(

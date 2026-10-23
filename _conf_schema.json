@@ -19,7 +19,7 @@
   },
   "remote_score_url": {
     "description": "远程成绩服务地址",
-    "hint": "安卓 Ubuntu 容器、ARM64 等设备需配置。填写自行部署的成绩服务根地址；Windows x64 或已配置本地运行环境的 Linux x64 可以留空。",
+    "hint": "可选，填写自行部署的成绩服务根地址。安卓 Ubuntu 24.04 ARM64 可由 Bot 管理员执行 舞萌环境准备，通过检测后可留空并使用本地模式；不适用本地模式的设备仍可配置远程服务。",
     "type": "string",
     "default": ""
   },

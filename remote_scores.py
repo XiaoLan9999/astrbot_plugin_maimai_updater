@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+if __package__:
+    from .maimai_official_interface.local_runtime import is_arm64_linux, prepared_runtime
+else:
+    from maimai_official_interface.local_runtime import is_arm64_linux, prepared_runtime
+
 
 DIVINGFISH_BASE = "https://www.diving-fish.com/api/maimaidxprober/"
 FC_NAMES = {0: "", 1: "fc", 2: "fcp", 3: "ap", 4: "app"}
@@ -19,7 +24,9 @@ class PortableBackendError(RuntimeError):
 
 
 def supports_local_runtime() -> bool:
-    return sys.platform in {"win32", "linux"} and platform.machine().lower() in {"amd64", "x86_64"}
+    return (
+        sys.platform in {"win32", "linux"} and platform.machine().lower() in {"amd64", "x86_64"}
+    ) or (is_arm64_linux() and prepared_runtime() is not None)
 
 
 def validate_service_url(url: str) -> str:

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .local_runtime import prepared_runtime
+
 
 BRIDGE_PATH_ENV = "MAIMAI_CHIME_BRIDGE_PATH"
 WINE_BINARY_ENV = "MAIMAI_CHIME_WINE_BINARY"
@@ -97,6 +99,9 @@ class WineChimeBridge:
                 return resolved
             raise WineBridgeUnavailableError("configured Wine x64 runtime is unavailable")
 
+        if runtime := prepared_runtime():
+            return str(runtime.wine_binary)
+
         for candidate in ("wine", "wine64", "/usr/lib/wine/wine64"):
             path = Path(candidate).expanduser()
             if path.is_absolute() and path.is_file():
@@ -109,6 +114,12 @@ class WineChimeBridge:
         environment = dict(os.environ)
         environment.setdefault("WINEARCH", "win64")
         environment.setdefault("WINEDEBUG", "-all")
+        if runtime := prepared_runtime():
+            if Path(self.wine_binary).resolve() == runtime.wine_binary.resolve():
+                environment["WINEPREFIX"] = str(runtime.prefix)
+                environment["WINEARCH"] = "win64"
+                environment.setdefault("HODLL64", "libarm64ecfex.dll")
+                environment.setdefault("WINEDLLOVERRIDES", "mscoree,mshtml=")
         if prefix := environment.get(WINE_PREFIX_ENV):
             environment["WINEPREFIX"] = prefix
         return environment
@@ -132,6 +143,10 @@ class WineChimeBridge:
             raise WineBridgeUnavailableError("official runtime asset is unavailable")
 
         command = [self.wine_binary, str(self.bridge_path)]
+        runtime = prepared_runtime()
+        if runtime and Path(self.wine_binary).resolve() == runtime.wine_binary.resolve() and not os.environ.get("DISPLAY"):
+            if display_runner := shutil.which("xvfb-run"):
+                command = [display_runner, "-a", *command]
         if probe:
             command.append("--probe")
 

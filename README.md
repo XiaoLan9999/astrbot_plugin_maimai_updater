@@ -15,6 +15,8 @@
 - `maimaiclear 确认清空` / `清空水鱼 确认清空` / `清空b50 确认清空`：向水鱼发送清空成绩请求。
 - `maimaistatus` / `水鱼状态`：查看绑定状态、最近同步结果和命令触发方式。
 - `maimaiunbind` / `水鱼解绑`：删除当前用户保存的水鱼 Token 和本地状态。
+- `maimaisetup` / `舞萌环境准备`：Bot 管理员准备安卓 Ubuntu 本地运行环境。
+- `maimairuntime` / `舞萌环境检测`：Bot 管理员检查本地运行环境，无需 SGID。
 
 绑定一次水鱼后，每次更新先发送更新命令，再在同一会话的 180 秒内发送官方玩家二维码图片或本次 SGID。等待期间发送 `取消更新` 可结束；重新发送更新命令会重新计时。等待时间可在面板修改。
 
@@ -59,15 +61,19 @@
 - AstrBot `>=4.5.2`
 - 依赖见 `requirements.txt`
 
-Windows x64 使用本地成绩链路；Linux x64 需已有配套运行环境。安卓 Ubuntu 容器、ARM64 等设备使用同一个插件包，通过远程成绩服务更新，保留 FC / FS / AP / SYNC 标识。
+Windows x64 使用本地成绩链路；Linux x64 需已有配套运行环境。安卓 Ubuntu 容器使用同一个插件包，可尝试本地运行环境，也可使用远程成绩服务；均使用完整成绩字段，保留 FC / FS / AP / SYNC 标识。
 
 ### 安卓 Ubuntu 容器
 
-适配对象包括 [AstrBot-Android-App](https://github.com/zz6zz666/AstrBot-Android-App) 的 Ubuntu 容器。手机端只负责接收消息、识别二维码和导入水鱼，完整官方成绩由自行部署的成绩服务读取。
+旧版 [AstrBot-Android-App](https://github.com/zz6zz666/AstrBot-Android-App/tree/v1.5.3) 使用 Ubuntu 24.04 ARM64 容器，本版本为其增加了实验性本地运行环境准备。
 
-在插件面板填写 `remote_score_url`（远程成绩服务根地址）和 `remote_score_token`（访问密钥）。未配置时插件会先提示管理员配置，再开始接收更新凭据。水鱼 Import-Token 仍使用水鱼绑定命令单独绑定。
+Bot 管理员发送 `舞萌环境准备`（按面板配置添加唤醒前缀）。首次会下载约 310 MB，并通过容器的包管理器安装配套组件，需要容器管理员权限、4 KB 内存页和至少 3 GB 可用空间。安装过程保持 App 运行。工具不会自动移除已安装的软件包，遇到冲突会停止。
 
-这不是安卓本机独立运行官方链路：需要一台已能正常读取完整成绩的 Windows x64 或 Linux x64 设备运行配套服务，详见 [远程成绩服务](docs/remote-score-service.md)。不需要按系统下载不同版本的插件。
+准备完成后发送 `舞萌环境检测`。只有实际运行探针通过，插件才会允许本地读取完整成绩。将 `remote_score_url` 留空后，正常发送更新水鱼即可；手机本地模式不需要另一台成绩服务器。
+
+这是实验性兼容方案，目前尚未完成安卓手机的官方会话实测。手机内核、内存页大小与 PRoot 限制仍可能影响启动；下载或单元测试通过不代表手机完整链路已验证。排查步骤见 [手机本地环境](docs/android-local-runtime.md)。
+
+不满足本地条件的设备，可以在插件面板填写 `remote_score_url` 和 `remote_score_token`，通过自行部署的完整成绩服务更新，详见 [远程成绩服务](docs/remote-score-service.md)。水鱼 Import-Token 仍使用水鱼绑定命令单独绑定。
 
 图片识别使用 Pillow 与 zxing-cpp；不需要额外安装系统级扫码工具。图片最大 20 MB、2400 万像素。
 

@@ -68,11 +68,13 @@ class Event:
         self.extra = {}
         self.messages = []
         self.stopped = False
+        self.admin = False
 
     def get_platform_name(self): return "test"
     def get_platform_id(self): return self.bot
     def get_sender_id(self): return self.sender
     def get_messages(self): return self.images
+    def is_admin(self): return self.admin
     def get_extra(self, key, default=None): return self.extra.get(key, default)
     def set_extra(self, key, value): self.extra[key] = value
     def stop_event(self): self.stopped = True
@@ -207,4 +209,21 @@ class UpdateCommandTest(unittest.IsolatedAsyncioTestCase):
         await self.plugin.handle_plain_command(Event("取消更新"))
         finish.set()
         await task
+        self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()
+
+    async def test_runtime_commands_cannot_be_started_by_group_members(self):
+        event = Event("舞萌环境准备")
+        with patch.object(plugin_module.asyncio, "create_subprocess_exec") as start:
+            await self.plugin.handle_plain_command(event)
+        start.assert_not_called()
+        self.assertIn("仅 Bot 管理员", event.messages[-1])
+
+    async def test_admin_can_probe_without_providing_sgid(self):
+        event = Event("舞萌环境检测")
+        event.admin = True
+        process = types.SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b'{"ready":true,"code":"ready"}', None)))
+        with patch.object(plugin_module.asyncio, "create_subprocess_exec", AsyncMock(return_value=process)) as start:
+            await self.plugin.handle_plain_command(event)
+        self.assertIn("检测通过", event.messages[-1])
+        self.assertNotIn("--install", start.call_args.args)
         self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()

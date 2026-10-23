@@ -1,6 +1,6 @@
 # 远程成绩服务
 
-安卓 Ubuntu / ARM64 容器使用本插件的远程模式。服务端部署在已经能正常读取完整官方成绩的 Windows x64 或 Linux x64 环境；手机不需要运行本地成绩链路。
+安卓 Ubuntu / ARM64 容器可以使用本插件的远程模式，也可以尝试 [手机本地环境](android-local-runtime.md)。远程模式的服务端部署在已经能正常读取完整官方成绩的 Windows x64 或 Linux x64 环境。
 
 在服务端获取本仓库，安装 `requirements.txt`。从仓库根目录启动服务：
 

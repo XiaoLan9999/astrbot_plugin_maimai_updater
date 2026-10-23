@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+import sys
 import time
+from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import register
@@ -13,6 +17,7 @@ from astrbot.api.message_components import Image
 from .maimai_service import MaimaiService
 from .message_recaller import RecallResult, MessageRecaller
 from .storage import UserStore
+from .maimai_official_interface.local_runtime import is_arm64_linux
 from .update_input import PendingUpdates, QrImageReader, UpdateInputError, select_sgid
 from .utils import (
     extract_sgid,
@@ -32,6 +37,8 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("clear", ("maimaiclear", "清空水鱼", "清空B50", "清空b50")),
     ("status", ("maimaistatus", "水鱼状态")),
     ("unbind", ("maimaiunbind", "水鱼解绑")),
+    ("runtime", ("maimairuntime", "舞萌环境检测")),
+    ("setup", ("maimaisetup", "舞萌环境准备")),
 )
 
 
@@ -39,7 +46,7 @@ PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     "astrbot_plugin_maimai_updater",
     "User",
     "使用一次性舞萌官方二维码凭据，把官方成绩同步到水鱼。",
-    "0.7.0",
+    "0.7.1",
     "",
 )
 class MaimaiUpdaterPlugin(Star):
@@ -70,6 +77,7 @@ class MaimaiUpdaterPlugin(Star):
         self.qr_reader = QrImageReader()
         self._active_updates: set[str] = set()
         self._reading_inputs: set[str] = set()
+        self._runtime_busy = False
 
     def _int_config(self, key: str, default: int) -> int:
         try:
@@ -427,6 +435,67 @@ class MaimaiUpdaterPlugin(Star):
             return self._message("✅ 已删除你的水鱼 Token 和本地展示状态。")
         return self._message("当前没有保存的绑定信息。")
 
+    async def _run_runtime_tool(self, event: AstrMessageEvent, *, install: bool = False):
+        event.stop_event()
+        if not event.is_admin():
+            return self._message("仅 Bot 管理员可以管理运行环境。")
+        if self._runtime_busy:
+            return self._message("运行环境正在准备或检测，请等待完成。")
+        if install and not is_arm64_linux():
+            return self._message("当前系统无需安卓环境准备。可发送 舞萌环境检测 检查本地环境。")
+        self._runtime_busy = True
+        try:
+            await self._send_text(event, (
+                "正在准备手机本地运行环境，首次需下载约 310 MB 并安装配套组件，请保留至少 3 GB 空间，完成前保持 App 运行。"
+                if install else "正在检测本地运行环境，此操作不需要 SGID。"
+            ))
+            script = Path(__file__).resolve().parent / "tools/setup_local_runtime.py"
+            arguments = [sys.executable, str(script)]
+            if install:
+                arguments.append("--install")
+            process = await asyncio.create_subprocess_exec(
+                *arguments, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            output, _ = await process.communicate()
+            payload = {}
+            for line in output.decode("utf-8", errors="replace").splitlines():
+                if line.startswith("{"):
+                    try:
+                        payload = json.loads(line)
+                    except ValueError:
+                        continue
+            if process.returncode == 0 and payload.get("ready") is True:
+                return self._message("本地运行环境检测通过。现在可以发送 更新水鱼，再按提示提供二维码或 SGID。")
+            code = str(payload.get("code") or "unknown")
+            logger.warning(
+                "[MaimaiUpdater] runtime preparation/check did not pass: code=%s detail=%s",
+                code, str(payload.get("detail") or ""),
+            )
+            messages = {
+                "requires_ubuntu_24_04": "当前准备工具适用于 Ubuntu 24.04 ARM64，请确认 App 的容器版本。",
+                "container_admin_required": "请在 App 的 Ubuntu 容器管理员环境中准备。",
+                "requires_3gb_free_space": "容器剩余空间不足，请保留至少 3 GB 空间后重试。",
+                "requires_4k_pages": "当前手机的内存页大小不适用本地运行环境，请继续使用远程成绩模式。",
+                "download_failed": "运行环境下载失败，请检查手机网络后重试。",
+                "download_checksum_mismatch": "下载文件校验失败，请重试。",
+                "not_prepared": "本地运行环境尚未准备。安卓端请 Bot 管理员发送 舞萌环境准备。",
+            }
+            return self._message(messages.get(code, "本地运行环境尚未通过检测，请查看后台安装记录并联系维护者。"))
+        except Exception:
+            logger.exception("[MaimaiUpdater] runtime preparation/check failed")
+            return self._message("运行环境检测或准备失败，请查看 Bot 后台日志。")
+        finally:
+            self._runtime_busy = False
+
+    @command("maimairuntime", alias={"舞萌环境检测"})
+    async def runtime_status(self, event: AstrMessageEvent):
+        return await self._run_runtime_tool(event)
+
+    @command("maimaisetup", alias={"舞萌环境准备"})
+    async def runtime_setup(self, event: AstrMessageEvent):
+        return await self._run_runtime_tool(event, install=True)
+
     @event_message_type(EventMessageType.ALL, priority=100)
     async def handle_plain_command(self, event: AstrMessageEvent):
         parsed = self._parse_plain_command(event.message_str or "")
@@ -465,6 +534,10 @@ class MaimaiUpdaterPlugin(Star):
             result = await self.status(event)
         elif command_key == "unbind":
             result = await self.unbind(event)
+        elif command_key == "runtime":
+            result = await self.runtime_status(event)
+        elif command_key == "setup":
+            result = await self.runtime_setup(event)
         else:
             return
         await self._send_command_result(event, result)
