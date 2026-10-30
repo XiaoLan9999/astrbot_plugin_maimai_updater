@@ -75,4 +75,6 @@ Bot 管理员发送 `舞萌环境准备`（按面板配置添加唤醒前缀）�
 
 图片识别使用 Pillow 与 zxing-cpp；不需要额外安装系统级扫码工具。图片最大 20 MB、2400 万像素。
 
+支持沿用 AstrBot 核心安装的 Pillow（包括 13.x）。若旧版插件提示 Pillow 版本保护冲突，请更新本插件后重试，无需降级 Pillow 或关闭 AstrBot 的依赖保护。
+
 如果依赖安装失败，完整关闭 AstrBot Launcher 和相关 Python 进程后重新安装插件依赖。
