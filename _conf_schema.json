@@ -1,9 +1,16 @@
 {
   "require_command_prefix": {
     "description": "需要唤醒前缀",
-    "hint": "开启后命令需带 Bot 唤醒前缀，例如 /更新水鱼；关闭后可直接发送 更新水鱼。触发后按提示发送二维码图片或 SGID，无需再加前缀。未触发更新时，单独发二维码或 SGID 不会更新。",
+    "hint": "开启后命令需带 Bot 唤醒前缀，例如 /水鱼更新；关闭后可直接发送 水鱼更新。分步更新开始后，后续二维码或 SGID 无需前缀。此选项与更新方式独立。",
     "type": "bool",
     "default": true
+  },
+  "update_mode": {
+    "description": "更新方式",
+    "hint": "单条更新：命令与 SGID 或二维码图片放在同一条消息中。分步更新：先单独发送 水鱼更新，收到提示后再发送二维码图片或 SGID。默认两种都开启，适用于全部更新命令别名。",
+    "type": "string",
+    "options": ["两种都开启", "仅单条更新", "仅分步更新"],
+    "default": "两种都开启"
   },
   "enable_clear_command": {
     "description": "启用清空水鱼命令",
@@ -13,7 +20,7 @@
   },
   "update_input_timeout_seconds": {
     "description": "等待二维码或 SGID 的时间",
-    "hint": "发送更新水鱼后，在同一会话等待该用户发送二维码图片或 SGID 的秒数。",
+    "hint": "分步更新时，在同一会话等待该用户发送二维码图片或 SGID 的秒数；仅单条更新模式不使用此项。",
     "type": "int",
     "default": 180
   },

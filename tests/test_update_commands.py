@@ -248,3 +248,120 @@ class UpdateCommandTest(unittest.IsolatedAsyncioTestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertNotIn("remote_score_url", schema)
         self.assertNotIn("remote_score_token", schema)
+
+    async def test_mode_matrix_for_all_aliases_and_command_routes(self):
+        aliases = next(names for key, names in plugin_module.PLAIN_COMMANDS if key == "update")
+        modes = (
+            (plugin_module.UPDATE_BOTH, True, True),
+            (plugin_module.UPDATE_INLINE, True, False),
+            (plugin_module.UPDATE_CONVERSATION, False, True),
+        )
+        for mode, allow_inline, allow_conversation in modes:
+            self.plugin.config["update_mode"] = mode
+            for prefixed in (False, True):
+                self.plugin.require_command_prefix = prefixed
+                for alias in aliases:
+                    with self.subTest(mode=mode, prefixed=prefixed, alias=alias):
+                        self.plugin.pending_updates.clear()
+                        self.plugin.service.sync_from_sgid_to_divingfish.reset_mock()
+                        start = Event(alias)
+                        if prefixed:
+                            await self.plugin.update_scores(start)
+                        else:
+                            await self.plugin.handle_plain_command(start)
+                        self.assertEqual(
+                            self.plugin.pending_updates.state(self.plugin._input_key(start)),
+                            "waiting" if allow_conversation else "absent",
+                        )
+                        if allow_conversation:
+                            self.assertIn("现在可以发送官方玩家二维码图片", start.messages[-1])
+                            self.assertIn("SGWCMAID", start.messages[-1])
+                            await self.plugin.handle_plain_command(Event(SGID))
+                            self.plugin.service.sync_from_sgid_to_divingfish.assert_awaited_once()
+                        else:
+                            self.assertIn("同一条消息", start.messages[-1])
+                            await self.plugin.handle_plain_command(Event(SGID))
+                            self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()
+
+                        self.plugin.pending_updates.clear()
+                        self.plugin.service.sync_from_sgid_to_divingfish.reset_mock()
+                        inline = Event(f"{alias} {SGID}")
+                        if prefixed:
+                            await self.plugin.update_scores(inline, SGID)
+                        else:
+                            await self.plugin.handle_plain_command(inline)
+                        self.assertEqual(self.plugin.service.sync_from_sgid_to_divingfish.await_count, int(allow_inline))
+                        if not allow_inline:
+                            self.assertIn("先单独发送", inline.messages[-1])
+
+    async def test_conversation_only_rejects_attached_image_without_decoding(self):
+        self.plugin.config["update_mode"] = plugin_module.UPDATE_CONVERSATION
+        self.plugin.qr_reader.read = AsyncMock(return_value=[SGID])
+        inline = Event("水鱼更新", images=[Image()])
+        await self.plugin.handle_plain_command(inline)
+        self.plugin.qr_reader.read.assert_not_awaited()
+        self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()
+        self.plugin._recall_current_message.assert_awaited_once_with(inline)
+        self.assertEqual(self.plugin.pending_updates.state(self.plugin._input_key(inline)), "absent")
+
+        await self.start()
+        await self.plugin.handle_plain_command(Event(images=[Image()]))
+        self.plugin.service.sync_from_sgid_to_divingfish.assert_awaited_once()
+
+    async def test_inline_only_accepts_command_with_image(self):
+        self.plugin.config["update_mode"] = plugin_module.UPDATE_INLINE
+        self.plugin.qr_reader.read = AsyncMock(return_value=[SGID])
+        await self.plugin.handle_plain_command(Event("水鱼更新", images=[Image()]))
+        self.plugin.qr_reader.read.assert_awaited_once()
+        self.plugin.service.sync_from_sgid_to_divingfish.assert_awaited_once()
+
+    async def test_old_wait_is_disabled_after_mode_change(self):
+        await self.start()
+        self.plugin.config["update_mode"] = plugin_module.UPDATE_INLINE
+        event = Event(SGID)
+        await self.plugin.handle_plain_command(event)
+        self.assertTrue(event.stopped)
+        self.assertIn("分步更新已关闭", event.messages[-1])
+        self.assertEqual(self.plugin.pending_updates.state(self.plugin._input_key(event)), "absent")
+        self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()
+
+    async def test_mode_change_during_image_read_blocks_disabled_flow(self):
+        for conversation in (True, False):
+            with self.subTest(conversation=conversation):
+                self.plugin.config["update_mode"] = plugin_module.UPDATE_BOTH
+                if conversation:
+                    await self.start()
+                started, finish = asyncio.Event(), asyncio.Event()
+
+                async def read(images):
+                    started.set()
+                    await finish.wait()
+                    return [SGID]
+
+                self.plugin.qr_reader.read = read
+                event = Event("" if conversation else "水鱼更新", images=[Image()])
+                task = asyncio.create_task(self.plugin.handle_plain_command(event))
+                await started.wait()
+                self.plugin.config["update_mode"] = (
+                    plugin_module.UPDATE_INLINE if conversation else plugin_module.UPDATE_CONVERSATION
+                )
+                finish.set()
+                await task
+                self.plugin.service.sync_from_sgid_to_divingfish.assert_not_awaited()
+                self.assertIn("更新方式已调整", event.messages[-1])
+
+    async def test_binding_and_status_hints_follow_current_mode(self):
+        for mode in (plugin_module.UPDATE_INLINE, plugin_module.UPDATE_CONVERSATION, plugin_module.UPDATE_BOTH):
+            self.plugin.config["update_mode"] = mode
+            event = Event()
+            await self.plugin.bind_token(event, "A" * 128)
+            status = await self.plugin.status(event)
+            for message in (event.messages[-1], status.text):
+                self.assertEqual("先单独发送" in message, mode != plugin_module.UPDATE_INLINE)
+                self.assertEqual("同一条消息" in message, mode != plugin_module.UPDATE_CONVERSATION)
+            self.assertIn(mode, status.text)
+
+    async def test_missing_or_unknown_mode_keeps_both_update_paths(self):
+        for value in (None, "unknown-mode", ""):
+            self.plugin.config["update_mode"] = value
+            self.assertEqual(self.plugin._update_mode(), plugin_module.UPDATE_BOTH)
